@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Chrome</title>
+<!-- Project Chrome 試作版（フェーズ5）：Webカメラで体を追跡し、サイバネティックな腕・猫耳・目のエフェクトを重ねて表示します。映像はこのPC内だけで処理されます。 -->
+<link rel="stylesheet" href="./css/style.css">
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="logo"><b>«</b> PROJECT CHROME</div>
+  <div class="status">
+    <span><i id="camdot"></i>CAMERA <b id="cam" class="bad">OFFLINE</b></span>
+    <span>POSE TRACKING: <b id="pose" class="bad">LOST</b></span>
+  </div>
+</header>
+<main>
+  <section id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="eyec"></canvas>
+    <canvas id="gl"></canvas>
+    <canvas id="skel"></canvas>
+    <div id="hud">
+      <div id="confbox">TRACKING CONFIDENCE
+        <div class="big"><span id="conf">0%</span></div><div class="bar"><i id="confbar"></i></div>
+        <small>CAMERA: <span id="camres">-</span><br>FPS: <span id="fps">0</span></small></div>
+      <div class="lbl" id="lbl0"></div><div class="lbl" id="lbl1"></div><div class="lbl" id="lbl2"></div>
+      <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
+    </div>
+  </section>
+  <aside id="panel">
+    <h2>CYBERWARE <em>// LOADOUT</em></h2>
+    <div id="tabs">
+      <div class="tab sel" data-t="arms">ARMS</div>
+      <div class="tab" data-t="eyes">EYES</div>
+      <div class="tab" data-t="head">HEAD</div>
+      <div class="tab locked" data-n="HAIR">HAIR<small>SOON</small></div>
+      <div class="tab locked" data-n="LEGS">LEGS<small>SOON</small></div>
+      <div class="tab locked" data-n="BACK">BACK<small>SOON</small></div>
+      <div class="tab locked" data-n="SPINE">SPINE<small>SOON</small></div>
+    </div>
+    <section id="sec-arms">
+      <h3>ARMS <em>// SELECT UPGRADE</em></h3>
+      <div id="cards"></div>
+      <div id="detail">
+        <div><b id="dname"></b><p id="ddesc"></p></div>
+        <div class="stats"><div>STRENGTH<u><i id="str"></i></u></div><div>SPEED<u><i id="spd"></i></u></div><div>DURABILITY<u><i id="dur"></i></u></div></div>
+      </div>
+    </section>
+    <section id="sec-eyes" hidden>
+      <h3>EYES <em>// LENS &amp; IMPLANT</em></h3>
+      <div class="seg" id="eyeMode"><button data-m="off" class="sel">OFF</button><button data-m="lens">LENS</button><button data-m="cyber">CYBER</button></div>
+      <div class="sw" id="eyeSw"></div>
+      <label>Custom color <input type="color" id="eyeCol" value="#00e5ff"></label>
+      <label>Opacity <input type="range" id="eyeOp" min="0.2" max="1" step="0.05" value="0.85"></label>
+      <p class="note">LENS：虹彩の模様と瞳孔を残したまま色だけを変えます（カラーコンタクト風）。CYBER：機械式の発光アイ。カメラに近いほど精度が上がります。</p>
+    </section>
+    <section id="sec-head" hidden>
+      <h3>HEAD <em>// IMPLANTS</em></h3>
+      <label>Cat ears (猫耳) <input type="checkbox" id="ears"></label>
+      <label>Ear size <input type="range" id="earSize" min="0.6" max="1.6" step="0.05" value="1"></label>
+      <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
+    </section>
+    <div id="btns"><button id="apply">APPLY MODIFICATION</button><button id="reset">↺ RESET</button></div>
+    <details>
+      <summary>TRACKING SETTINGS</summary>
+      <label>Skeleton overlay <input type="checkbox" id="showSkel"></label>
+      <label>Smoothing <input type="range" id="smooth" min="0" max="1" step="0.05" value="0.5"></label>
+      <label>Depth effect <input type="range" id="depth" min="0" max="1" step="0.05" value="0.5"></label>
+      <label>Arm thickness <input type="range" id="thick" min="0.6" max="1.8" step="0.05" value="1"></label>
+    </details>
+    <div id="info">起動中...</div>
+  </aside>
+</main>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

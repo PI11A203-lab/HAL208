@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+coverage/
+test-results/
+.DS_Store
+Thumbs.db
+/running.png

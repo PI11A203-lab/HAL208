@@ -1,0 +1,7 @@
+---
+description: HAL208全体の共通作業規則
+alwaysApply: true
+---
+
+作業開始時にルートのAGENTS.mdとCONTRIBUTING.mdを読み、遵守する。
+通常のPR先はdevelop。mainの最終マージはPI11A203-lab所有者が行う。
