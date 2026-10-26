@@ -1,0 +1,8 @@
+---
+description: HAL208全体の共通作業規則
+alwaysApply: true
+---
+
+作業開始時にルートのAGENTS.md、CONTRIBUTING.md、docs/rules/README.md、docs/rules/ai-instructions.mdを読み、遵守する。
+詳細はdocs/rules/README.mdから作業に必要な文書だけを参照する。Notionへの接続は不要。
+通常のPR先はdevelop。mainの最終マージはPI11A203-lab所有者が行う。

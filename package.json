@@ -1,0 +1,20 @@
+{
+  "name": "hal208-project-chrome",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "lint": "eslint project-chrome/js scripts tests eslint.config.mjs",
+    "lint:fix": "eslint project-chrome/js scripts tests eslint.config.mjs --fix",
+    "test": "node --test tests/tracking.test.mjs tests/assets.test.mjs tests/pr-policy.test.mjs",
+    "check:pr": "node scripts/check-pr.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "espree": "11.2.0",
+    "globals": "17.13.0"
+  }
+}

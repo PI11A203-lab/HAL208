@@ -1,0 +1,57 @@
+/* Project Chrome — UI styles */
+* { box-sizing: border-box; }
+  body { margin: 0; background: #070c12; color: #cfe8ee; font-family: -apple-system, "Avenir Next", sans-serif; }
+  header { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid #12323c; }
+  .logo { font-size: 20px; letter-spacing: 5px; color: #e6faff; } .logo b { color: #00e5ff; }
+  .status { display: flex; gap: 28px; font-size: 12px; letter-spacing: 1px; }
+  .status b.ok, .ok { color: #00e5ff; } .bad { color: #ffb300; }
+  #camdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #ffb300; margin-right: 8px; }
+  #camdot.on { background: #00e676; box-shadow: 0 0 8px #00e676; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 410px; gap: 14px; padding: 14px; align-items: start; }
+  #stage { position: relative; border: 1px solid #12323c; border-radius: 8px; overflow: hidden; background: #000; }
+  video, canvas { width: 100%; display: block; transform: scaleX(-1); }
+  video { background: #000; min-height: 200px; }
+  canvas { position: absolute; left: 0; top: 0; height: 100%; background: transparent; }
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  #confbox { position: absolute; left: 14px; top: 14px; padding: 10px 14px; background: rgba(8,20,28,.8); border: 1px solid #0e4a58; border-radius: 6px; font-size: 11px; letter-spacing: 1px; color: #4dd0e1; min-width: 210px; }
+  #confbox .big { font-size: 24px; color: #fff; letter-spacing: 0; margin: 2px 0 4px; }
+  .bar { height: 5px; background: #12323c; border-radius: 3px; } .bar i { display: block; height: 100%; width: 0; background: #00e5ff; border-radius: 3px; }
+  #confbox small { color: #9bb8c0; line-height: 1.6; }
+  .lbl { position: absolute; display: none; transform: translate(14px, -50%); font-size: 11px; color: #00e5ff; letter-spacing: 1px; padding-left: 8px; border-left: 2px solid #00e5ff; }
+  .lbl b { color: #fff; font-size: 13px; font-weight: 500; }
+  #pill { position: absolute; right: 14px; bottom: 14px; padding: 8px 14px; background: rgba(8,20,28,.85); border: 1px solid #0e4a58; border-radius: 6px; font-size: 11px; letter-spacing: 1px; }
+  #pill i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 8px; }
+  #panel { border: 1px solid #12323c; border-radius: 8px; background: #0a131a; padding: 16px; }
+  h2 { margin: 0 0 12px; font-size: 20px; letter-spacing: 3px; color: #00e5ff; font-weight: 600; }
+  h3 { margin: 16px 0 10px; font-size: 14px; letter-spacing: 2px; }
+  h2 em, h3 em { font-style: normal; color: #7fa3ad; } h3 em { color: #00e5ff; font-size: 12px; }
+  #tabs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .tab { border: 1px solid #16363f; border-radius: 6px; padding: 10px 0 7px; text-align: center; font-size: 10px; letter-spacing: 1px; cursor: pointer; background: #0c1a22; }
+  .tab.sel { border-color: #00e5ff; box-shadow: 0 0 10px rgba(0,229,255,.35); color: #fff; }
+  .tab.locked { opacity: .45; } .tab small { display: block; font-size: 8px; color: #ffb300; margin-top: 2px; }
+  #cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .card { border: 1px solid #16363f; border-radius: 6px; padding: 8px; background: #0c1a22; cursor: pointer; }
+  .card.sel { border-color: #00e5ff; box-shadow: 0 0 12px rgba(0,229,255,.35); }
+  .card svg { width: 100%; height: 86px; } .card b { display: block; font-size: 12px; letter-spacing: 1px; margin: 4px 0; }
+  .card p { margin: 0 0 8px; font-size: 10px; line-height: 1.4; color: #8fb0b9; min-height: 42px; }
+  .card span { display: block; text-align: center; border: 1px solid #0e5a6a; border-radius: 4px; padding: 5px 0; font-size: 10px; letter-spacing: 1px; color: #4dd0e1; }
+  .card.sel span { background: #0e4a58; color: #fff; }
+  #detail { display: flex; gap: 14px; margin-top: 12px; padding: 12px; border: 1px solid #16363f; border-radius: 6px; background: #0c1a22; }
+  #detail > div:first-child { flex: 1.3; } #dname { font-size: 15px; letter-spacing: 1px; } #ddesc { margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: #8fb0b9; }
+  .stats { flex: 1; font-size: 9px; letter-spacing: 1px; color: #8fb0b9; } .stats div { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .stats u { flex: 1; height: 5px; background: #12323c; border-radius: 3px; } .stats u i { display: block; height: 100%; background: #00e5ff; border-radius: 3px; }
+  #btns { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin-top: 12px; }
+  #btns button { padding: 14px 0; border-radius: 6px; font-size: 12px; letter-spacing: 2px; cursor: pointer; font-weight: 600; }
+  #apply { background: linear-gradient(90deg, #00b8d4, #18ffff); color: #04222a; border: 0; }
+  #reset { background: transparent; color: #cfe8ee; border: 1px solid #2a4a54; }
+  details { margin-top: 14px; font-size: 12px; color: #9bb8c0; } summary { cursor: pointer; letter-spacing: 2px; font-size: 11px; }
+  details label { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+  #info { margin-top: 10px; font-size: 11px; color: #ffb300; min-height: 14px; }
+#tabs{grid-template-columns:repeat(7,1fr)} .tab{font-size:9px;letter-spacing:0}
+  section[hidden]{display:none}
+  section label{display:flex;justify-content:space-between;align-items:center;margin:10px 0;font-size:12px;color:#9bb8c0}
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .seg button{padding:9px 0;background:#0c1a22;color:#9bb8c0;border:1px solid #16363f;border-radius:6px;cursor:pointer;font-size:11px;letter-spacing:1px}
+  .seg button.sel{border-color:#00e5ff;color:#fff;box-shadow:0 0 10px rgba(0,229,255,.3)}
+  .sw{display:flex;gap:8px;margin:12px 0}.sw i{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #16363f}
+  .note{font-size:10px;color:#7fa3ad;line-height:1.5}
