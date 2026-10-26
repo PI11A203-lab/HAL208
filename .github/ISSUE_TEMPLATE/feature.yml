@@ -1,0 +1,41 @@
+name: 機能・改善
+description: 追加機能と使いやすさの改善
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的・利用場面
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 実現したい動作
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 今回やらないこと
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 確認方法
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 担当・依存
+    validations:
+      required: true

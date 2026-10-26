@@ -1,0 +1,53 @@
+name: 不具合報告
+description: 再現条件と期待動作を記録
+title: "fix: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 不具合の概要
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 再現環境
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待される動作
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響・頻度
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+    validations:
+      required: true
+  - type: textarea
+    id: related
+    attributes:
+      label: 担当・関連Issue
+    validations:
+      required: true

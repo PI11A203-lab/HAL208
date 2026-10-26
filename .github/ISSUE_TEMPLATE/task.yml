@@ -1,0 +1,37 @@
+name: 作業タスク
+description: 文書・調査・環境整備などの作業
+title: "chore: "
+body:
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的・背景
+      description: なぜ必要かを記載してください
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 作業内容・対象外
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 第三者が確認できる条件を記載してください
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 確認方法
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 担当・依存
+      description: 担当者は作成後にAssigneesにも設定してください
+    validations:
+      required: true
