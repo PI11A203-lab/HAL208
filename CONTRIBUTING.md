@@ -51,5 +51,6 @@ mainとdevelopは削除しません。デプロイは行いません。
 API・描画・カメラの実動作を静的テストだけで保証しません。
 
 ## 文書の管理
-repoの規約・Templateを実作業の正本とし、[HAL208 Notion](https://aide-market.notion.site/HAL208-3ff346d701f9814d8155efc1166cbfbd)にも変更を反映します。
-Notionへ接続できないAIでも、このファイルとAGENTS.mdで作業できます。
+repoの規約・Templateを実作業の正本とします。Notionでまとめた詳細は[ローカル規則一覧](docs/rules/README.md)から参照できます。
+AIはAGENTS.md、このファイル、規則一覧、[メンバーAI共通規則](docs/rules/ai-instructions.md)を読み、作業に必要な詳細だけを追加で確認します。
+[HAL208 Notion](https://aide-market.notion.site/HAL208-3ff346d701f9814d8155efc1166cbfbd)はそのまま保存し、更新依頼がある場合だけ変更します。Notionへの接続は不要です。

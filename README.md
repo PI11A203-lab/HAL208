@@ -37,6 +37,7 @@ CIはWindows・Linuxでlintと自動テスト、PR方向を確認します。
 - `.github/`：CI、PR・IssueのTemplate。
 - [AGENTS.md](AGENTS.md)：AIが最初に読む規則。
 - [CONTRIBUTING.md](CONTRIBUTING.md)：メンバー用作業手順。
+- [ローカル規則一覧](docs/rules/README.md)：Notionから移した共同開発ルール・テンプレート・AI共通指示。repo内だけで参照可能。
 - [CI_SETUP.md](CI_SETUP.md)：自動検査、手動確認、GitHub設定。
 - [作品README](project-chrome/README.md)：パーツ構成とGLBモデル追加。
 - [HAL208 Notion](https://aide-market.notion.site/HAL208-3ff346d701f9814d8155efc1166cbfbd)：配布用規則・AI初期設定ガイド。

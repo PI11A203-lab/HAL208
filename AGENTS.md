@@ -2,7 +2,7 @@
 
 ## 対象と基本方針
 - 対象は `PI11A203-lab/HAL208`。作品は `project-chrome/`。ローカル実行のみで、デプロイは行わない。
-- 作業前にこのファイル、[CONTRIBUTING.md](CONTRIBUTING.md)、関連README・設定を必要な範囲で読む。
+- 作業前にこのファイル、[CONTRIBUTING.md](CONTRIBUTING.md)、[ローカル規則の入口](docs/rules/README.md)、[メンバーAI共通規則](docs/rules/ai-instructions.md)を読む。詳細は入口から必要な文書・設定だけを参照する。
 - 最新のコード・テストを確認し、依頼範囲外の修正や他人の未commit差分に触れない。
 - GitHub上のcommit、PR、Issue、レビュー、返信は原則日本語。技術用語は原文を使う。
 
@@ -26,4 +26,4 @@
 - UI・カメラ変更は[CI_SETUP.md](CI_SETUP.md)の手動確認を行い、未確認箇所と理由を記載する。
 - シークレット、実環境の.env、ログ、node_modules、不要な生成物・個人情報をcommitしない。
 - 完了報告は変更、実行コマンドと結果、未検証・残る問題、実際のIssue/PR/commitリンクを示す。
-- [HAL208 Notion](https://aide-market.notion.site/HAL208-3ff346d701f9814d8155efc1166cbfbd)は説明と配布用。取得できなくてもこのrepoの規則で作業できる。
+- Notionの共同開発ルールは [docs/rules/](docs/rules/README.md) に移した。このrepo内の文書だけで作業でき、Notion接続は不要。元のNotionは保存し、更新依頼がある場合だけ変更する。
