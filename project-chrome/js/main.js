@@ -371,22 +371,37 @@ function renderCards() {
   $("dname").textContent = d.name; $("ddesc").textContent = d.long;
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
+const EQUIP_MS = 1000;
+let equipTimer = null;
+function cancelEquip() {
+  if (equipTimer !== null) clearTimeout(equipTimer);
+  equipTimer = null;
+}
 function syncPhaseUI() {
   $("back").hidden = exp.phase !== PHASES.ACTION;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 $("apply").onclick = () => {
+  if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
-  exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: exp.requestId }); // 装着演出はまだないため、すぐ完了させる
   applyDesign(DESIGNS[selected]);
+  const id = exp.requestId;
+  cancelEquip();
+  equipTimer = setTimeout(() => {
+    equipTimer = null;
+    exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: id }); // 古い完了は experience.js が無視する
+    syncPhaseUI();
+  }, EQUIP_MS);
   syncPhaseUI();
-  say(DESIGNS[selected].name + " を適用しました。");
+  say("装着中…");
 };
 $("back").onclick = () => {
+  cancelEquip();
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   syncPhaseUI();
   say("装備選択に戻りました。");
@@ -397,6 +412,7 @@ $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
 $("reset").onclick = () => {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
+  cancelEquip();
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
