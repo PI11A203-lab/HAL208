@@ -151,10 +151,14 @@ function processFrame(result, now) {
   if (!lm) return;
   const minCutoff = 3.0 * Math.pow(0.1, settings.smooth); // 0 → 3Hz（平滑化が弱い）、1 → 0.3Hz（平滑化が強い）
   for (const id of JOINTS) {
-    const q = lm[id], j = joints[id]; j.vis = q.visibility ?? 0;
-    if ((q.visibility ?? 0) < VIS_MIN) continue;        // 信頼度の低い点：最後の位置を保持
-    // 欠落・非有限値（NaN/Infinity）の点はlastSeenを更新せず保持（契約：異常点で跳ばさない）
-    if (!q || !isFinitePoint({ x: q.x, y: q.y, z: q.z ?? 0 })) continue;
+    const q = lm[id], j = joints[id];
+    // 欠落点は visibility を参照する前に弾く（q が無いと q.visibility で TypeError になるため）。
+    // lastSeen を更新せず最後の位置を保持する（契約：異常点で跳ばさない）。
+    if (!q) continue;
+    j.vis = q.visibility ?? 0;
+    if (j.vis < VIS_MIN) continue;                      // 信頼度の低い点：最後の位置を保持
+    // 非有限値（NaN/Infinity）の点も同様に保持。
+    if (!isFinitePoint({ x: q.x, y: q.y, z: q.z ?? 0 })) continue;
     if (now - j.lastSeen > 0.3) { j.fx.reset(); j.fy.reset(); j.fz.reset(); } // 長く途切れた後に滑って戻らないようリセット
     const x = j.fx.filter(q.x * W, now, minCutoff, BETA);
     const y = j.fy.filter(q.y * H, now, minCutoff, BETA);
