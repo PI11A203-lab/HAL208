@@ -69,7 +69,11 @@
       <label>Ear size <input type="range" id="earSize" min="0.6" max="1.6" step="0.05" value="1"></label>
       <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
     </section>
-    <div id="btns"><button id="apply">APPLY MODIFICATION</button><button id="reset">↺ RESET</button></div>
+    <div id="btns">
+      <button id="apply">APPLY MODIFICATION</button>
+      <button id="back" hidden>← 装備選択へ戻る</button>
+      <button id="reset">↺ RESET</button>
+    </div>
     <details>
       <summary>TRACKING SETTINGS</summary>
       <label>Skeleton overlay <input type="checkbox" id="showSkel"></label>

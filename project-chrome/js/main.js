@@ -371,6 +371,9 @@ function renderCards() {
   $("dname").textContent = d.name; $("ddesc").textContent = d.long;
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
+function syncPhaseUI() {
+  $("back").hidden = exp.phase !== PHASES.ACTION;
+}
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
@@ -380,7 +383,13 @@ $("apply").onclick = () => {
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
   exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: exp.requestId }); // 装着演出はまだないため、すぐ完了させる
   applyDesign(DESIGNS[selected]);
+  syncPhaseUI();
   say(DESIGNS[selected].name + " を適用しました。");
+};
+$("back").onclick = () => {
+  exp = reduceExperience(exp, { type: EVENTS.BACK });
+  syncPhaseUI();
+  say("装備選択に戻りました。");
 };
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
@@ -394,8 +403,10 @@ $("reset").onclick = () => {
   face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  syncPhaseUI();
 };
 renderCards();
+syncPhaseUI();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
