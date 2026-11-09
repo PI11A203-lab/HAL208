@@ -20,6 +20,7 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 
 /* ---------------- One Euro filtresi ---------------- */
 import { OneEuro } from './tracking.js';
+import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
@@ -164,7 +165,7 @@ function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  arm.g.visible = settings.showArm && age < HOLD_SEC;
+  arm.g.visible = exp.phase === PHASES.ACTION && age < HOLD_SEC;
   if (!arm.g.visible) return;
 
   const [sh, el, wr] = js.map(j => conv(j.p));
@@ -349,7 +350,7 @@ const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-settings.showArm = false; // APPLYを押すまで腕は表示しない
+let exp = createExperience(); // APPLYを押すまで腕は表示しない
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -373,13 +374,21 @@ function renderCards() {
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
-$("apply").onclick = () => { applyDesign(DESIGNS[selected]); settings.showArm = true; say(DESIGNS[selected].name + " を適用しました。"); };
+$("apply").onclick = () => {
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
+  exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: exp.requestId }); // 装着演出はまだないため、すぐ完了させる
+  applyDesign(DESIGNS[selected]);
+  say(DESIGNS[selected].name + " を適用しました。");
+};
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
 $("reset").onclick = () => {
-  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
+  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
+  exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
   face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
