@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { loadGLB } from "./arms.js";
+import { loadGLB, loadArmTemplate, createArmView } from "./arms.js";
+import { createRequestTracker, handTip, handBackNormal, assignHands } from "./arm-model.js";
+import { measureWidth, createSmoother } from "./body-fit.js";
 import { earShape } from "./face.js";
-import { PoseLandmarker, FaceLandmarker, FilesetResolver }
+import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 const video = document.getElementById("video");
@@ -23,11 +25,12 @@ import { OneEuro } from './tracking.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
-let landmarker, faceLm;
+let landmarker, faceLm, visionFiles;
 try {
   info.textContent = "モデルを読み込み中（インターネット接続が必要）...";
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  visionFiles = vision;
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
@@ -35,6 +38,7 @@ try {
     },
     runningMode: "VIDEO",
     numPoses: 1,
+    outputSegmentationMasks: true, // 人物の切り抜き：腕の実際の太さを測るために使う
   });
   // 顔モデル：猫耳と目のエフェクト用
   faceLm = await FaceLandmarker.createFromOptions(vision, {
@@ -116,6 +120,49 @@ function makeArm(name, ids) {
 const ARMS = [makeArm("Left arm", [11, 13, 15]), makeArm("Right arm", [12, 14, 16])];
 // カスタムGLBモデルの読み込みには arms.js の loadGLB() を使用できます。
 
+/* ---------------- GLB腕モデル（Issue #7） ---------------- */
+// status：none（簡易形状）/ loading / ready / failed。views は ARMS と同じ順の左右の表示。
+// requests で最新の依頼だけを有効にし、連続切替やRESET後に古いモデルが復活しないようにする。
+const armModel = { id: null, status: "none", views: null, requests: createRequestTracker() };
+
+function clearArmModel() {
+  armModel.requests.cancel();
+  armModel.views?.forEach(v => v.dispose());
+  Object.assign(armModel, { id: null, status: "none", views: null });
+}
+
+async function useArmModel(id) {
+  if (armModel.id === id && armModel.status === "ready") {   // 同じモデルは読み直さず外観だけ更新
+    armModel.views.forEach(v => v.applyAppearance(design));
+    say(design.name + " を適用しました。");
+    return;
+  }
+  const model = ARM_MODELS[id];
+  const request = armModel.requests.next();
+  armModel.id = id; armModel.status = "loading";
+  info.textContent = "腕モデルを読み込み中...";           // 読込中は簡易形状で表示を続ける
+  const t0 = performance.now();
+  try {
+    if (!model) throw new Error(`ARM_MODELS に ${id} がありません`);
+    const template = await loadArmTemplate(model.url);
+    if (!armModel.requests.isCurrent(request)) return;       // 途中で別の装備やRESETが選ばれた
+    // MediaPipe の 11-13-15 は本人の左腕。右腕として作ったモデルは左腕で左右反転する
+    const views = ARMS.map(arm => createArmView(template, model, { mirror: Boolean(model.mirrorLeft) && arm.ids[0] === 11 }));
+    armModel.views?.forEach(v => v.dispose());
+    views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
+    armModel.views = views; armModel.model = model; armModel.status = "ready";
+    if (views.some(v => v.hasFingers)) ensureHandLandmarker();   // 指の追跡は必要になってから読み込む
+    console.info(`腕モデル ${id} を ${Math.round(performance.now() - t0)} ms で読み込みました。`);
+    say(design.name + " を適用しました。");
+  } catch (e) {
+    if (!armModel.requests.isCurrent(request)) return;
+    armModel.views?.forEach(v => v.dispose());
+    Object.assign(armModel, { views: null, status: "failed" });
+    console.warn("腕モデルを読み込めませんでした。簡易モデルで表示します。", e);
+    say("腕モデルを読み込めませんでした。簡易モデルで表示します。");
+  }
+}
+
 /* ---------------- Eklem durumu ---------------- */
 const JOINTS = [11, 12, 13, 14, 15, 16];
 const joints = {};
@@ -127,6 +174,93 @@ function resetJoints() {
 }
 resetJoints();
 let bodyScale = 0.2 * W; // 肩幅（ピクセル）：腕の太さの基準
+
+/* ---------------- 体格に合わせた腕の太さ ---------------- */
+// 人物の切り抜きマスクから上腕・前腕の実際の幅を測り、なめらかにして使う（測れない間は肩幅から推定）
+for (const arm of ARMS) arm.fit = { upper: createSmoother(BODY_FIT.smoothing), fore: createSmoother(BODY_FIT.smoothing) };
+let fitFrame = 0;
+
+function processBodyFit(result) {
+  const masks = result.segmentationMasks ?? [];
+  try {
+    if (!masks.length || fitFrame++ % BODY_FIT.everyFrames !== 0) return;
+    const mask = masks[0], data = mask.getAsFloat32Array();
+    const opts = { maxHalf: bodyScale * 0.35 };
+    const ok = (w) => (w !== null && w > bodyScale * 0.05 && w < bodyScale * 0.6 ? w : null);
+    const now = performance.now() / 1000;
+    for (const arm of ARMS) {
+      const [s, e, w] = arm.ids.map(id => joints[id]);
+      if ([s, e, w].some(j => now - j.lastSeen > 0.2)) continue;
+      // マスクの解像度が映像と違う場合に合わせる
+      const sx = mask.width / W, sy = mask.height / H;
+      const px = (j) => ({ x: j.p.x * sx, y: j.p.y * sy });
+      arm.fit.upper.update(ok(measureWidth(data, mask.width, mask.height, px(s), px(e), opts) / sx));
+      arm.fit.fore.update(ok(measureWidth(data, mask.width, mask.height, px(e), px(w), opts) / sx));
+    }
+  } finally {
+    masks.forEach(m => m.close()); // 毎フレーム解放する（GPUメモリの増加を防ぐ）
+  }
+}
+
+/* ---------------- 指の追跡 ---------------- */
+// 指に分かれたGLB腕を表示している間だけ、手の21点を検出して指の節を動かす
+let handLm = null, handLmLoading = false;
+for (const arm of ARMS) {
+  arm.hand = { pts: Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0 })), lastSeen: -Infinity,
+               f: Array.from({ length: 21 }, () => [new OneEuro(), new OneEuro(), new OneEuro()]) };
+}
+
+async function ensureHandLandmarker() {
+  if (handLm || handLmLoading) return;
+  handLmLoading = true;
+  try {
+    handLm = await HandLandmarker.createFromOptions(visionFiles, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 2,
+    });
+  } catch (e) {
+    console.warn("手の追跡モデルを読み込めませんでした。指は固定の形で表示します。", e);
+  } finally {
+    handLmLoading = false;
+  }
+}
+
+function processHands(t0, now) {
+  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !settings.showArm) return;
+  const res = handLm.detectForVideo(video, t0);
+  const hands = res.landmarks ?? [];
+  if (!hands.length) return;
+  const pick = assignHands(hands.map(l => ({ x: l[0].x * W, y: l[0].y * H })),
+                           ARMS.map(a => joints[a.ids[2]].p), bodyScale * 0.6);
+  const minCutoff = 3.0 * Math.pow(0.1, settings.smooth);
+  ARMS.forEach((arm, i) => {
+    if (pick[i] < 0) return;
+    const h = arm.hand, reset = now - h.lastSeen > 0.3;
+    hands[pick[i]].forEach((q, k) => {
+      const f = h.f[k];
+      if (reset) f.forEach(x => x.reset());
+      h.pts[k].x = f[0].filter(q.x * W, now, minCutoff, BETA);
+      h.pts[k].y = f[1].filter(q.y * H, now, minCutoff, BETA);
+      h.pts[k].z = f[2].filter(q.z * W, now, minCutoff, BETA);
+    });
+    h.lastSeen = now;
+  });
+}
+
+// 手の21点をシーン座標にし、手首を腕の手首に合わせる
+function handPose(arm, wrist, now) {
+  const h = arm.hand;
+  if (now - h.lastSeen > 0.25) return null;
+  const pts = h.pts.map(p => [p.x, H - p.y, -p.z * settings.depth]);
+  const d = [0, 1, 2].map(i => wrist[i] - pts[0][i]);
+  pts.forEach(p => { p[0] += d[0]; p[1] += d[1]; p[2] += d[2]; });
+  const palm = Math.hypot(...[0, 1, 2].map(i => pts[5][i] - pts[17][i]));
+  return { points: pts, back: handBackNormal(pts, arm.ids[0] === 12), radius: palm * 0.62 * BODY_FIT.cover };
+}
 
 function processFrame(result, now) {
   const lm = result.landmarks[0];
@@ -164,15 +298,31 @@ function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  arm.g.visible = settings.showArm && age < HOLD_SEC;
-  if (!arm.g.visible) return;
+  const show = settings.showArm && age < HOLD_SEC;
+  const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
+  arm.g.visible = show && !view;
+  view?.setVisible(show);
+  if (!show) return;
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   const m = arm.m;
-  const base = bodyScale * 0.14 * settings.thick * design.thick;
+  // 腕の太さ：測れていれば実際の幅（少し大きめ）、測れていなければ肩幅から推定
+  const k = settings.thick * design.thick;
+  const guess = bodyScale * 0.14 * k;
+  const upperR = arm.fit.upper.value !== null ? arm.fit.upper.value / 2 * BODY_FIT.cover * k : guess;
+  const foreR = arm.fit.fore.value !== null ? arm.fit.fore.value / 2 * BODY_FIT.cover * k : guess * 0.85;
+  const base = upperR;
+
+  if (view) {
+    const [a, b, c] = [sh, el, wr].map(v => v.toArray());
+    const rs = armModel.model.parts.fore.radiusScale ?? 1;
+    view.applyPose({ shoulder: a, elbow: b, wrist: c, handTip: handTip(b, c, armModel.model.handRatio) },
+                   { upper: upperR, fore: foreR / rs, hand: foreR / rs }, view.hasFingers ? handPose(arm, c, now) : null);
+    return;
+  }
 
   setCyl(m.upper, sh, el, base);
-  setCyl(m.fore, el, wr, base * 0.85);
+  setCyl(m.fore, el, wr, foreR);
   m.shoulder.position.copy(sh); m.shoulder.scale.setScalar(base * 1.25);
   m.elbow.position.copy(el);    m.elbow.scale.setScalar(base * 1.1);
 
@@ -346,7 +496,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS } from './config.js';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
 settings.showArm = false; // APPLYを押すまで腕は表示しない
@@ -373,7 +523,12 @@ function renderCards() {
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
-$("apply").onclick = () => { applyDesign(DESIGNS[selected]); settings.showArm = true; say(DESIGNS[selected].name + " を適用しました。"); };
+$("apply").onclick = () => {
+  applyDesign(DESIGNS[selected]); settings.showArm = true;
+  if (design.model) { useArmModel(design.model); return; }   // GLBモデルがある装備
+  clearArmModel();
+  say(DESIGNS[selected].name + " を適用しました。");
+};
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
@@ -382,9 +537,11 @@ $("reset").onclick = () => {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
+  ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
   face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  clearArmModel();
 };
 renderCards();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
@@ -430,6 +587,8 @@ function loop() {
     const now = t0 / 1000;
 
     processFrame(result, now);
+    processBodyFit(result);
+    processHands(t0, now);
     if (face.ears || face.eyeMode !== "off") processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
     ARMS.forEach(a => updateArm(a, now));
     updateFace(now);
