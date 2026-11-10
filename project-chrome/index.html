@@ -35,6 +35,23 @@
       <div class="lbl" id="lbl0"></div><div class="lbl" id="lbl1"></div><div class="lbl" id="lbl2"></div>
       <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
     </div>
+    <div id="actionBar">
+      <div id="guide" hidden>
+        <b>OPERATION GUIDE</b>
+        <ul>
+          <li>BACK TO SELECT：装備を変えられます（装備は残ります）</li>
+          <li>装備を外すのはスタッフが行います</li>
+        </ul>
+      </div>
+      <div class="actionBtns">
+        <button id="back" hidden>← BACK TO SELECT</button>
+        <button id="help" hidden>? GUIDE</button>
+      </div>
+    </div>
+    <div id="staffConfirm" hidden>
+      <b>スタッフ用リセット</b>
+      <p>Enterで実行 / Escで取り消し</p>
+    </div>
   </section>
   <aside id="panel">
     <h2>CYBERWARE <em>// LOADOUT</em></h2>
@@ -71,7 +88,6 @@
     </section>
     <div id="btns">
       <button id="apply">APPLY MODIFICATION</button>
-      <button id="back" hidden>← 装備選択へ戻る</button>
       <button id="reset">↺ RESET</button>
     </div>
     <details>

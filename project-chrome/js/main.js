@@ -378,7 +378,12 @@ function cancelEquip() {
   equipTimer = null;
 }
 function syncPhaseUI() {
-  $("back").hidden = exp.phase !== PHASES.ACTION;
+  const action = exp.phase === PHASES.ACTION;
+  document.body.classList.toggle("phase-action", action);
+  $("back").hidden = !action;
+  $("help").hidden = !action;
+  if (!action) $("guide").hidden = true;
+  $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
@@ -406,11 +411,20 @@ $("back").onclick = () => {
   syncPhaseUI();
   say("装備選択に戻りました。");
 };
+$("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
+let staffOpen = false;
+function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
+window.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.shiftKey && (e.key === "R" || e.key === "r")) { e.preventDefault(); setStaffConfirm(true); return; }
+  if (!staffOpen) return;
+  if (e.key === "Enter") { e.preventDefault(); setStaffConfirm(false); doReset(); }
+  else if (e.key === "Escape") setStaffConfirm(false);
+});
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
-$("reset").onclick = () => {
+function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
@@ -420,7 +434,8 @@ $("reset").onclick = () => {
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
   syncPhaseUI();
-};
+}
+$("reset").onclick = doReset;
 renderCards();
 syncPhaseUI();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
