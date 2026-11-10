@@ -88,6 +88,7 @@ camera.position.z = 2000;
 /* ---------------- Robot kol modeli ---------------- */
 // 腕専用マテリアル（shell / joint / emission の3スロット）。猫耳とは共有しない。
 // 左右の腕は同じ3つのmaterialを共有する（色変更が左右に同時に反映される）。
+// 色・質感は applyAppearanceToMaterials() が appState.applied から更新する（materialは作り直さない）。
 const armShellMat    = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
 const armJointMat    = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
 const armEmissionMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
@@ -351,18 +352,31 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS } from './config.js';
+import { DESIGNS, DEFAULTS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js';
+import {
+  APPEARANCE_KEYS, createAppearanceState, selectPreset, editDraft,
+  applyDraft, switchDesign, resetAppearance,
+} from './appearance.js';
 
+// 外観の状態は appState ひとつ。画面の表示は renderAppearance() がここから描き直す。
+//   appState.draft   : 編集中の値（APPLYするまで腕に反映しない）
+//   appState.applied : 腕に反映済みの値
+let appState = createAppearanceState(DESIGNS, DEMO_PRESETS, "mk1");
 let selected = "mk1", design = DESIGNS.mk1;
 settings.showArm = false; // APPLYを押すまで腕は表示しない
 
-// 腕用マテリアルだけを更新する（猫耳のマテリアルには触れない）
-function applyDesign(d) {
-  armShellMat.color.setHex(d.metal); armShellMat.roughness = d.rough;
-  armJointMat.color.setHex(d.joint);
-  armEmissionMat.color.setHex(d.neon); armEmissionMat.emissive.setHex(d.neon); armEmissionMat.emissiveIntensity = d.glow;
-  design = d;
+// 腕用マテリアルだけを更新する（猫耳のマテリアルには触れない。materialは作り直さず既存instanceを更新）
+function applyAppearanceToMaterials(a) {
+  armShellMat.color.set(a.shellColor);
+  armShellMat.metalness = a.metalness;
+  armShellMat.roughness = a.roughness;
+  armJointMat.color.set(a.jointColor);
+  armEmissionMat.color.set(a.emissionColor);
+  armEmissionMat.emissive.set(a.emissionColor);
+  armEmissionMat.emissiveIntensity = a.glow;
 }
+applyAppearanceToMaterials(appState.applied);
+
 function thumb(d) { // 仮の簡易イラスト（実際のモデルではない）
   const [m, j, n] = d.css;
   return `<svg viewBox="0 0 60 80"><g transform="rotate(14 30 40)"><rect x="22" y="3" width="16" height="33" rx="8" fill="${m}" stroke="${n}" stroke-opacity=".5"/>` +
@@ -377,9 +391,72 @@ function renderCards() {
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
-$("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
+
+// プリセット・素材ボタンは最初に1回だけ作る（選択表示の切替は renderAppearance が行う）
+$("presets").innerHTML = DEMO_PRESETS.map(p => `<button data-p="${p.id}">${p.label}</button>`).join("");
+$("materials").innerHTML = Object.entries(MATERIAL_PRESETS).map(([k, m]) => `<button data-mat="${k}">${m.label}</button>`).join("");
+
+// appState から、画面（カード・プリセット・素材・色・スライダー・状態表示）をまとめて更新する
+function renderAppearance() {
+  const next = appState.pendingDesignId ?? appState.designId;
+  if (next !== selected) { selected = next; renderCards(); }
+  const d = appState.draft;
+  $("armShell").value = d.shellColor;
+  $("armJoint").value = d.jointColor;
+  $("armEmission").value = d.emissionColor;
+  $("armMetal").value = d.metalness; $("armMetalV").textContent = d.metalness.toFixed(2);
+  $("armRough").value = d.roughness; $("armRoughV").textContent = d.roughness.toFixed(2);
+  $("armGlow").value = d.glow;       $("armGlowV").textContent = d.glow.toFixed(1);
+  document.querySelectorAll("#presets button").forEach(b => b.classList.toggle("sel", b.dataset.p === appState.presetId));
+  document.querySelectorAll("#materials button").forEach(b => {
+    const m = MATERIAL_PRESETS[b.dataset.mat];
+    b.classList.toggle("sel", d.metalness === m.metalness && d.roughness === m.roughness);
+  });
+  const preset = DEMO_PRESETS.find(p => p.id === appState.presetId);
+  $("presetState").textContent = "プリセット：" + (appState.presetId === "custom" ? "カスタム" : preset ? preset.label : "未選択");
+  const dirty = (appState.pendingDesignId !== undefined && appState.pendingDesignId !== appState.designId)
+    || APPEARANCE_KEYS.some(k => appState.draft[k] !== appState.applied[k]);
+  $("applyState").textContent = dirty ? "編集中：APPLYで腕に反映されます"
+    : settings.showArm ? "装着中の外観と一致しています" : "未装着：APPLYで装備します";
+}
+
+function edit(patch) { appState = editDraft(appState, patch); renderAppearance(); }
+
+// デザインカードを選ぶ：編集値(draft)をそのデザインの既定値にするだけで、APPLYまで装備は変えない
+$("cards").onclick = e => {
+  const c = e.target.closest(".card");
+  if (!c) return;
+  const k = c.dataset.k, sw = switchDesign(appState, k);
+  appState = { ...appState, draft: sw.draft, presetId: null, basePresetId: null, pendingDesignId: k, errors: [] };
+  renderAppearance();
+};
+$("presets").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  appState = selectPreset(appState, b.dataset.p);
+  if (appState.errors.length) say("プリセットを適用できませんでした。");
+  renderAppearance();
+};
+$("materials").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const m = MATERIAL_PRESETS[b.dataset.mat];
+  edit({ metalness: m.metalness, roughness: m.roughness });
+};
+$("armShell").oninput = e => edit({ shellColor: e.target.value });
+$("armJoint").oninput = e => edit({ jointColor: e.target.value });
+$("armEmission").oninput = e => edit({ emissionColor: e.target.value });
+$("armMetal").oninput = e => edit({ metalness: +e.target.value });
+$("armRough").oninput = e => edit({ roughness: +e.target.value });
+$("armGlow").oninput = e => edit({ glow: +e.target.value });
+
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
-$("apply").onclick = () => { applyDesign(DESIGNS[selected]); settings.showArm = true; say(DESIGNS[selected].name + " を適用しました。"); };
+$("apply").onclick = () => {
+  appState = applyDraft(appState);
+  applyAppearanceToMaterials(appState.applied);
+  design = DESIGNS[appState.designId];
+  settings.showArm = true;
+  renderAppearance();
+  say(design.name + " を適用しました。");
+};
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
@@ -387,12 +464,16 @@ $("thick").oninput = e => settings.thick = +e.target.value;
 $("reset").onclick = () => {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
-  selected = "mk1"; renderCards(); resetJoints();
+  appState = resetAppearance(appState);              // 外観の状態をmk1の既定へ
+  applyAppearanceToMaterials(appState.applied);      // 腕のマテリアルも既定へ（古い色を残さない）
+  design = DESIGNS[appState.designId];
+  renderAppearance(); resetJoints();
   face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
 };
 renderCards();
+renderAppearance();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
