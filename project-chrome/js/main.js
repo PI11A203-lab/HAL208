@@ -86,9 +86,11 @@ const camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
 camera.position.z = 2000;
 
 /* ---------------- Robot kol modeli ---------------- */
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
-const jointMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
-const neonMat  = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
+// 腕専用マテリアル（shell / joint / emission の3スロット）。猫耳とは共有しない。
+// 左右の腕は同じ3つのmaterialを共有する（色変更が左右に同時に反映される）。
+const armShellMat    = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
+const armJointMat    = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
+const armEmissionMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 
 // 円柱：先端（+Y側）をやや細くし、腕の先に向かって細くなる形にする
 const cylGeo = new THREE.CylinderGeometry(0.8, 1, 1, 32);
@@ -99,13 +101,13 @@ const torusGeo = new THREE.TorusGeometry(1, 0.08, 12, 48);
 function makeArm(name, ids) {
   const g = new THREE.Group();
   const m = {
-    shoulder: new THREE.Mesh(sphereGeo, jointMat),
-    upper: new THREE.Mesh(cylGeo, metalMat),
-    elbow: new THREE.Mesh(sphereGeo, jointMat),
-    fore: new THREE.Mesh(cylGeo, metalMat),
-    hand: new THREE.Mesh(boxGeo, metalMat),
-    ring1: new THREE.Mesh(torusGeo, neonMat),
-    ring2: new THREE.Mesh(torusGeo, neonMat),
+    shoulder: new THREE.Mesh(sphereGeo, armJointMat),
+    upper: new THREE.Mesh(cylGeo, armShellMat),
+    elbow: new THREE.Mesh(sphereGeo, armJointMat),
+    fore: new THREE.Mesh(cylGeo, armShellMat),
+    hand: new THREE.Mesh(boxGeo, armShellMat),
+    ring1: new THREE.Mesh(torusGeo, armEmissionMat),
+    ring2: new THREE.Mesh(torusGeo, armEmissionMat),
   };
   Object.values(m).forEach(mesh => g.add(mesh));
   g.visible = false;
@@ -223,8 +225,11 @@ const fp = {}; // 平滑化した顔の点（ピクセル空間）
 for (const id of FIDS) fp[id] = { f: [new OneEuro(), new OneEuro(), new OneEuro()], p: new THREE.Vector3() };
 
 /* --- 3D猫耳：外殻（面取り付きの金属プレート）＋内側の発光パネル＋根元のカラー＋発光ライン --- */
+// 猫耳専用マテリアル。腕のマテリアルとは共有しない（腕の外観変更が猫耳に影響しないようにするため）。
 const earMat = new THREE.MeshStandardMaterial({ color: 0x1b1f25, metalness: 0.9, roughness: 0.3 });
 const earInMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.4 });
+const earCollarMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
+const earSeamMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 const outerGeo = new THREE.ExtrudeGeometry(earShape(1), { depth: 0.16, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 14 });
 outerGeo.translate(0, 0, -0.13);   // 厚みの中心を z=0 に合わせる
 const innerGeo = new THREE.ExtrudeGeometry(earShape(0.6), { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 14 });
@@ -232,7 +237,7 @@ innerGeo.translate(0, 0.09, 0.07); // 外殻の前面からわずかに突き出
 const ears = [0, 1].map(() => {
   const g = new THREE.Group();
   const p = { g, shell: new THREE.Mesh(outerGeo, earMat), inner: new THREE.Mesh(innerGeo, earInMat),
-              collar: new THREE.Mesh(cylGeo, jointMat), seam: new THREE.Mesh(boxGeo, neonMat) };
+              collar: new THREE.Mesh(cylGeo, earCollarMat), seam: new THREE.Mesh(boxGeo, earSeamMat) };
   g.add(p.shell, p.inner, p.collar, p.seam); g.visible = false; scene.add(g);
   return p;
 });
@@ -351,10 +356,11 @@ import { DESIGNS, DEFAULTS } from './config.js';
 let selected = "mk1", design = DESIGNS.mk1;
 settings.showArm = false; // APPLYを押すまで腕は表示しない
 
+// 腕用マテリアルだけを更新する（猫耳のマテリアルには触れない）
 function applyDesign(d) {
-  metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
-  jointMat.color.setHex(d.joint);
-  neonMat.color.setHex(d.neon); neonMat.emissive.setHex(d.neon); neonMat.emissiveIntensity = d.glow;
+  armShellMat.color.setHex(d.metal); armShellMat.roughness = d.rough;
+  armJointMat.color.setHex(d.joint);
+  armEmissionMat.color.setHex(d.neon); armEmissionMat.emissive.setHex(d.neon); armEmissionMat.emissiveIntensity = d.glow;
   design = d;
 }
 function thumb(d) { // 仮の簡易イラスト（実際のモデルではない）
