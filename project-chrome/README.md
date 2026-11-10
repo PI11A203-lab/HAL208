@@ -68,18 +68,50 @@ project-chrome/
 
 ## 体験の流れ（状態遷移）
 
-| 状態 | 画面の内容 | 次に進む操作 |
-|---|---|---|
-| select（装備選択） | 装備カードを選べる。腕は表示しない | APPLY MODIFICATION → equipping |
-| equipping（装着中） | 「装着中…」を表示。APPLYは無効。約1秒で完了 | 完了 → action（自動） |
-| action（体験） | 腕を表示。「← 装備選択へ戻る」が出る | 戻る → select |
+### 状態図
 
-- どの状態でも **RESET** で初期状態（mk1・腕非表示）に戻ります。
-- 装着中に戻る・RESETを押した場合は、待機中の装着を取り消します。
-- 古い装着の完了は無視されます（連打や途中操作で画面が崩れないため）。
+```mermaid
+stateDiagram-v2
+    [*] --> select
+    select --> equipping: APPLY（EYES・HEADでも可）
+    equipping --> action: 約1秒後に自動
+    action --> select: 「← BACK TO SELECT」
+    equipping --> select: RESET（装着を取り消す）
+    action --> select: RESET（スタッフ用を含む）
+```
+
+※ RESETはどの状態からでも mk1・腕非表示・ARMS表示の初期状態に戻ります。図では代表的な経路だけを描いています。
+
+### 状態ごとの画面とボタン
+
+| 状態 | 右パネル | 映像上の腕 | ボタンの表示 | 案内 |
+|---|---|---|---|---|
+| select（装備選択） | 表示 | 表示しない | APPLY（有効）、RESET（表示） | なし |
+| equipping（装着中） | 表示 | 表示しない | APPLY（無効）、RESET（表示） | 「装着中…」（約3秒で消えるトースト） |
+| action（体験） | 非表示（映像を広げる） | 表示 | BACK（表示）、GUIDE（表示）、RESET（非表示） | GUIDEを押すと操作の説明を表示 |
+
+### 遷移条件
+
+| 操作・イベント | 有効な状態 | 結果 | 無効なときの扱い |
+|---|---|---|---|
+| APPLY（ARMS・EYES・HEAD） | select | equipping に入り、約1秒後に action へ進む | equipping中は無視（連打防止） |
+| APPLY（action中） | action | いったん select に戻してから装着し直す | — |
+| 約1秒の経過（完了） | equipping | action へ進む | 古い装着の完了は無視する |
+| BACK TO SELECT | action | select に戻る。選んでいた装備は残る | — |
+| RESET（来場者用） | すべて | 初期状態に戻し、装着中の完了も取り消す | — |
+| スタッフ用リセット（Ctrl + Shift + R） | すべて | RESETと同じ初期化 | 確認欄でEnterを押したときだけ実行 |
+
+### 追跡喪失の扱い
+
+- 腕を見失っても **状態（phase）は変わりません**。action のまま、腕だけ非表示になります。
+- 再び映ると、同じ action の中で腕が戻ります。
+- 追跡の状態は、画面右上の「POSE TRACKING」と右下の「TRACKING」で確認できます。
+
+### その他の注意
+
+- 装着中に BACK や RESET を押すと、待機中の装着は取り消されます。
+- EYES・HEADでの変更（目の色、猫耳など）は、APPLYを押さなくても即時に反映されます。
 - 状態の判定ロジックは `js/experience.js` にあり、`tests/experience.test.mjs` で確認しています。
-- EYES・HEADタブでもAPPLYを押せます。押すと、ARMSと同じく約1秒の装着演出を経て体験画面へ進みます。
-- 体験中は右パネルが隠れ、映像が広がります。右下に「← BACK TO SELECT」と「? GUIDE」を表示します。RESETボタンは選択画面にだけ出ます。
 
 ### スタッフ用リセット（来場者は使いません）
 
