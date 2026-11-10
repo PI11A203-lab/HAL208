@@ -430,9 +430,18 @@ function doReset() {
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
-  face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
+  // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
+  face.ears = false; face.earSize = 1; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
+  $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
+  $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
+  document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
+  applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  // タブを初期表示（ARMS）へ戻す
+  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
+  $("apply").style.display = "";
   syncPhaseUI();
 }
 $("reset").onclick = doReset;
