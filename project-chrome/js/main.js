@@ -22,6 +22,8 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 import { OneEuro } from './tracking.js';
 import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
 
+import { unlockAudio, playEquip } from './sound.js';
+
 
 /* ---------------- モデルとカメラ ---------------- */
 let landmarker, faceLm;
@@ -394,6 +396,8 @@ $("apply").onclick = () => {
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
+  unlockAudio();
+  playEquip();
   applyDesign(DESIGNS[selected]);
   const id = exp.requestId;
   cancelEquip();
