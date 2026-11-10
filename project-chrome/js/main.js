@@ -20,6 +20,8 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 
 /* ---------------- One Euro filtresi ---------------- */
 import { OneEuro } from './tracking.js';
+import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
+import { unlockAudio, playEquip } from './sound.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
@@ -164,7 +166,7 @@ function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  arm.g.visible = settings.showArm && age < HOLD_SEC;
+  arm.g.visible = exp.phase === PHASES.ACTION && age < HOLD_SEC;
   if (!arm.g.visible) return;
 
   const [sh, el, wr] = js.map(j => conv(j.p));
@@ -349,7 +351,7 @@ const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-settings.showArm = false; // APPLYを押すまで腕は表示しない
+let exp = createExperience(); // APPLYを押すまで腕は表示しない
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -370,27 +372,88 @@ function renderCards() {
   $("dname").textContent = d.name; $("ddesc").textContent = d.long;
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
+const EQUIP_MS = 1000;
+let equipTimer = null;
+function cancelEquip() {
+  if (equipTimer !== null) clearTimeout(equipTimer);
+  equipTimer = null;
+}
+function syncPhaseUI() {
+  const action = exp.phase === PHASES.ACTION;
+  document.body.classList.toggle("phase-action", action);
+  $("back").hidden = !action;
+  $("help").hidden = !action;
+  if (!action) $("guide").hidden = true;
+  $("reset").hidden = action;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+}
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
-$("apply").onclick = () => { applyDesign(DESIGNS[selected]); settings.showArm = true; say(DESIGNS[selected].name + " を適用しました。"); };
+$("apply").onclick = () => {
+  if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
+  unlockAudio();
+  playEquip();
+  applyDesign(DESIGNS[selected]);
+  const id = exp.requestId;
+  cancelEquip();
+  equipTimer = setTimeout(() => {
+    equipTimer = null;
+    exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: id }); // 古い完了は experience.js が無視する
+    syncPhaseUI();
+  }, EQUIP_MS);
+  syncPhaseUI();
+  say("装着中…");
+};
+$("back").onclick = () => {
+  cancelEquip();
+  exp = reduceExperience(exp, { type: EVENTS.BACK });
+  syncPhaseUI();
+  say("装備選択に戻りました。");
+};
+$("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
+let staffOpen = false;
+function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
+window.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.shiftKey && (e.key === "R" || e.key === "r")) { e.preventDefault(); setStaffConfirm(true); return; }
+  if (!staffOpen) return;
+  if (e.key === "Enter") { e.preventDefault(); setStaffConfirm(false); doReset(); }
+  else if (e.key === "Escape") setStaffConfirm(false);
+});
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
-$("reset").onclick = () => {
-  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
+function doReset() {
+  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
+  cancelEquip();
+  exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
-  face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
+  // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
+  face.ears = false; face.earSize = 1; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
+  $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
+  $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
+  document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
+  applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
-};
+  // タブを初期表示（ARMS）へ戻す
+  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
+  $("apply").style.display = "";
+  syncPhaseUI();
+}
+$("reset").onclick = doReset;
 renderCards();
+syncPhaseUI();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
-  $("apply").style.display = t.dataset.t === "arms" ? "" : "none";
+  $("apply").style.display = "";
 });
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");
 $("eyeSw").onclick = e => { const c = e.target.dataset.c; if (c) { face.eyeCol = c; $("eyeCol").value = c; } };

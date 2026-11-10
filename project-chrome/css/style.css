@@ -55,3 +55,25 @@
   .seg button.sel{border-color:#00e5ff;color:#fff;box-shadow:0 0 10px rgba(0,229,255,.3)}
   .sw{display:flex;gap:8px;margin:12px 0}.sw i{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #16363f}
   .note{font-size:10px;color:#7fa3ad;line-height:1.5}
+  /* ---- 体験画面（phase-action）：操作ボタン・ガイド・スタッフ用確認 ---- */
+#actionBar { position: absolute; right: 14px; bottom: 60px; z-index: 5; }
+.actionBtns { display: flex; gap: 10px; }
+.actionBtns button { padding: 12px 18px; border-radius: 6px; font-size: 12px; letter-spacing: 2px; cursor: pointer; font-weight: 600; }
+#back { background: linear-gradient(90deg, #00b8d4, #18ffff); color: #04222a; border: 0; }
+#help { background: transparent; color: #cfe8ee; border: 1px solid #2a4a54; }
+#back[hidden], #help[hidden], #guide[hidden], #staffConfirm[hidden] { display: none; }
+
+#guide { position: absolute; right: 0; bottom: calc(100% + 10px); width: 300px; padding: 12px 14px; background: rgba(8,20,28,.92); border: 1px solid #0e4a58; border-radius: 6px; font-size: 11px; line-height: 1.6; color: #9bb8c0; }
+#guide b { color: #4dd0e1; letter-spacing: 1px; }
+#guide ul { margin: 6px 0 0; padding-left: 16px; }
+
+#staffConfirm { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10; padding: 18px 24px; background: rgba(8,20,28,.95); border: 1px solid #ffb300; border-radius: 8px; text-align: center; font-size: 13px; color: #fff; }
+#staffConfirm p { margin: 8px 0 0; color: #ffb300; letter-spacing: 1px; }
+
+/* 体験中：パネルを隠して映像を広げる（16:9を想定） */
+body.phase-action main { grid-template-columns: minmax(0, 1fr); }
+body.phase-action #panel { display: none; }
+body.phase-action #stage { width: 100%; max-width: calc((100vh - 100px) * 16 / 9); margin: 0 auto; }
+
+/* ---- 体験画面：GUIDEボタンをTRACKING表示と同じ背景に ---- */
+#help { background: rgba(8,20,28,.85); border-color: #0e4a58; color: #cfe8ee; }
