@@ -54,6 +54,17 @@
         <div><b id="dname"></b><p id="ddesc"></p></div>
         <div class="stats"><div>STRENGTH<u><i id="str"></i></u></div><div>SPEED<u><i id="spd"></i></u></div><div>DURABILITY<u><i id="dur"></i></u></div></div>
       </div>
+      <h3>APPEARANCE <em>// DEMO PRESETS</em></h3>
+      <div class="seg" id="presets"></div>
+      <p class="note" id="presetState"></p>
+      <div class="seg" id="materials"></div>
+      <label>Shell color <input type="color" id="armShell" value="#aab2ba"></label>
+      <label>Joint color <input type="color" id="armJoint" value="#1a1e24"></label>
+      <label>Emission color <input type="color" id="armEmission" value="#00e5ff"></label>
+      <label>Metalness <input type="range" id="armMetal" min="0" max="1" step="0.05" value="0.9"> <output id="armMetalV">0.90</output></label>
+      <label>Roughness <input type="range" id="armRough" min="0" max="1" step="0.05" value="0.28"> <output id="armRoughV">0.28</output></label>
+      <label>Glow <input type="range" id="armGlow" min="0" max="5" step="0.1" value="1.2"> <output id="armGlowV">1.2</output></label>
+      <p class="note" id="applyState"></p>
     </section>
     <section id="sec-eyes" hidden>
       <h3>EYES <em>// LENS &amp; IMPLANT</em></h3>

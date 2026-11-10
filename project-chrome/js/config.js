@@ -10,3 +10,19 @@ export const DESIGNS = {
   titan: { name: "TITAN FRAME", desc: "重作業向けの産業用エグゾスケルトン。", long: "最大出力と積載能力を重視した重作業向けの産業用アーム。",
            metal: 0x3a3d42, rough: 0.4, joint: 0x18191c, neon: 0xffb300, glow: 1.6, thick: 1.3, stats: [90, 30, 85], css: ["#4a4e55", "#18191c", "#ffb300"] },
 };
+
+// 素材の種類（金属 / マット）
+export const MATERIAL_PRESETS = {
+  metal: { label: "メタル", metalness: 0.9, roughness: 0.25 },
+  matte: { label: "マット", metalness: 0.1, roughness: 0.85 },
+};
+
+// 展示用の固定プリセット（designId は上の DESIGNS に存在するものだけ）
+export const DEMO_PRESETS = [
+  { id: "demo-chrome", label: "クロームシルバー", designId: "mk1",
+    appearance: { shellColor: "#aab2ba", jointColor: "#1a1e24", emissionColor: "#00e5ff", metalness: 0.9, roughness: 0.25, glow: 1.2 } },
+  { id: "demo-night", label: "ナイトマット", designId: "neon",
+    appearance: { shellColor: "#0b0f13", jointColor: "#05080a", emissionColor: "#00e5ff", metalness: 0.1, roughness: 0.85, glow: 3.2 } },
+  { id: "demo-amber", label: "アンバーインダストリアル", designId: "titan",
+    appearance: { shellColor: "#3a3d42", jointColor: "#18191c", emissionColor: "#ffb300", metalness: 0.8, roughness: 0.4, glow: 1.6 } },
+];
