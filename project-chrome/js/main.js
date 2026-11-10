@@ -454,7 +454,7 @@ syncPhaseUI();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
-  $("apply").style.display = t.dataset.t === "arms" ? "" : "none";
+  $("apply").style.display = "";
 });
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");
 $("eyeSw").onclick = e => { const c = e.target.dataset.c; if (c) { face.eyeCol = c; $("eyeCol").value = c; } };
