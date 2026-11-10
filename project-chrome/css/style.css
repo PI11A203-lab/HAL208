@@ -75,3 +75,5 @@ body.phase-action main { grid-template-columns: minmax(0, 1fr); }
 body.phase-action #panel { display: none; }
 body.phase-action #stage { width: 100%; max-width: calc((100vh - 100px) * 16 / 9); margin: 0 auto; }
 
+/* ---- 体験画面：GUIDEボタンをTRACKING表示と同じ背景に ---- */
+#help { background: rgba(8,20,28,.85); border-color: #0e4a58; color: #cfe8ee; }
