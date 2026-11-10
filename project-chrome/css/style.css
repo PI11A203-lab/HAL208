@@ -55,3 +55,5 @@
   .seg button.sel{border-color:#00e5ff;color:#fff;box-shadow:0 0 10px rgba(0,229,255,.3)}
   .sw{display:flex;gap:8px;margin:12px 0}.sw i{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #16363f}
   .note{font-size:10px;color:#7fa3ad;line-height:1.5}
+  .capture-btn { width: 100%; margin-top: 10px; padding: 12px 0; border-radius: 6px; font-size: 12px; letter-spacing: 2px; cursor: pointer; font-weight: 600; }
+  .capture-btn:disabled { opacity: .5; cursor: wait; }

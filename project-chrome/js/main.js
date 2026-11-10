@@ -401,6 +401,36 @@ $("ears").onchange = e => face.ears = e.target.checked;
 $("earSize").oninput = e => face.earSize = +e.target.value;
 $("earCol").oninput = e => earMat.color.set(e.target.value);
 
+/* ---------------- 撮影（PNG保存） #11 ---------------- */
+import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
+const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
+const shotCtx = shotCanvas.getContext("2d");
+const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+$("capture").onclick = () => {
+  if (!capture.request()) { say(capture.busy ? "保存処理中です。" : "カメラの準備ができていません。"); return; }
+  $("capture").disabled = true;
+  say("撮影中...");
+};
+function endCapture() { capture.finish(); $("capture").disabled = false; }
+function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+$("reset").addEventListener("click", cancelCapture); // RESETで未実行の撮影要求を取り消す
+// renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
+function runCapture() {
+  if (!capture.take()) return;
+  try {
+    composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
+  } catch (e) {
+    console.warn("撮影の合成に失敗:", e.message);
+    say("撮影に失敗しました。もう一度お試しください。");
+    endCapture();
+    return;
+  }
+  canvasToPngBlob(shotCanvas)
+    .then(blob => { downloadBlob(blob, makeFileName(), { doc: document, urlApi: URL }); say("ダウンロードを開始しました。"); })
+    .catch(e => { console.warn("PNG保存に失敗:", e.message); say("保存に失敗しました。もう一度お試しください。"); })
+    .finally(endCapture);
+}
+
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
   $("conf").textContent = Math.round(conf * 100) + "%"; $("confbar").style.width = conf * 100 + "%";
@@ -440,6 +470,7 @@ function loop() {
     updateHud(now);
   }
   renderer.render(scene, camera);
+  runCapture();
   requestAnimationFrame(loop);
 }
 loop();
