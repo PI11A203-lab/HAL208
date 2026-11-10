@@ -41,10 +41,12 @@ project-chrome/
 │   ├── main.js      起動、描画ループ、UIイベントの統合
 │   ├── config.js    デザイン一覧と初期設定
 │   ├── tracking.js  One Euro フィルター
-│   ├── arms.js      GLBモデル読み込みヘルパー
+│   ├── arms.js      GLB腕モデルの読込・表示
+│   ├── arm-model.js 腕モデルの規格と姿勢計算（Nodeテスト対象）
+│   ├── body-fit.js  人物マスクから腕の幅を測る（Nodeテスト対象）
 │   ├── face.js      猫耳ジオメトリ
 │   └── ui.js        UI共通ヘルパー（段階的な分離用）
-└── models/          自作 .glb モデルを置く場所
+└── assets/models/   GLBモデルと規格（README.md）
 ```
 
 ## 自作の猫耳・腕を追加する
@@ -60,7 +62,9 @@ project-chrome/
 
 `js/arms.js` には Three.js の `GLTFLoader` を使う `loadGLB()` を用意しています。読み込んだモデルを既存の追跡グループに追加する処理は、モデルの原点・向き・スケールを確認してから接続してください。
 
-現時点では、既存の円柱・球体による腕とコード生成の猫耳がデフォルトです。GLBヘルパーは追加済みですが、モデルファイルがない状態でも従来の表示が維持されます。自作モデルの自動選択UIや、GLBへの完全な置き換えは次の実装ステップです。
+APPLY すると、選んだ装備のGLBモデル（MK-I：`arm-mk1.glb`、NEON EDGE：`arm-neon.glb`、TITAN FRAME：`arm-titan.glb`）を読み込んで表示します。モデルが読み込めない場合は案内を出し、円柱・球体の腕で表示を続けます。
+腕の太さは、カメラに映った人の腕の実際の幅に合わせて自動で変わります。GLBの腕では、手を追跡して指が1本ずつ動きます（初回は手の追跡モデルの読み込みに数秒かかります）。
+腕モデルのノード名・原点・向き・縮尺・マテリアル名の規格は [assets/models/README.md](assets/models/README.md) を参照してください。
 
 ### 3. 猫耳の形をコードで調整する
 
