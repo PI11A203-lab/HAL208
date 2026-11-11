@@ -67,10 +67,10 @@ export const GADGET = {
 };
 
 // 指先の火：人差し指だけを立てて holdSec 秒で点く。size：手のひらの幅に対する炎の大きさ
-export const FLAME = { holdSec: 0.2, size: 1.1 };
+export const FLAME = { holdSec: 0.3, size: 1.1 };
 
 // 炎の連番画像（流体シミュレーションで作成。assets/fx/README.md）。cols×rows コマ、fps：再生速度、base：画像の下から炎の付け根までの割合
-export const FIRE_FLIPBOOK = { url: "./assets/fx/fire-flipbook.jpg", cols: 8, rows: 8, fps: 30, base: 0.07 };
+export const FIRE_FLIPBOOK = { url: "./assets/fx/fire-flipbook.jpg", cols: 8, rows: 8, fps: 30, base: 0.12 };
 
 // 効果音（assets/sfx/。make-sfx.py で合成したオリジナル）。volume：全体の音量、gain：音ごとの音量の補正
 export const SFX = {

@@ -6,10 +6,10 @@
 export const GADGET_KINDS = ['plasma', 'net', 'hook', 'fist'];
 
 // AUTO（ジェスチャーで選ぶ）の時の、手の形・動きとギミックの対応。画面の操作ガイドにも使います。
-//   point：人差し指だけ（親指はたたむ）→ 指先の火
+//   point：人差し指だけを上へ立てる → 指先の火
 //   open ：腕を上げて手を開く → PLASMA を溜め、拳を握るか腕を下ろすと発射
 //   spider：人差し指と小指を立てる → NET（スパイダーマンのウェブ）
-//   pistol：親指と人差し指を立てる（ピストル）→ HOOK
+//   pistol：人差し指を横・前へ向け、親指を立てる（ピストル）→ HOOK
 //   punch：拳を握って肘を勢いよく伸ばす → FIST（ロケットパンチ）
 export const GESTURE_TO_GADGET = { spider: 'net', pistol: 'hook' };
 
@@ -76,27 +76,84 @@ export function elbowAngle(sh, el, wr) {
 
 /* ---------------- 手のジェスチャー（21点、各点は [x, y, z]） ---------------- */
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-// 指先が第2関節より手首から十分遠ければ「伸びている」
+// 3点 a-b-c の b での角度（度）。180＝まっすぐ
+function jointAngle(a, b, c) {
+  const u = [0, 1, 2].map((k) => a[k] - b[k]), v = [0, 1, 2].map((k) => c[k] - b[k]);
+  const lu = Math.hypot(...u), lv = Math.hypot(...v);
+  if (lu < 1e-6 || lv < 1e-6) return 180;
+  const cos = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (lu * lv);
+  return Math.acos(Math.min(1, Math.max(-1, cos))) * 180 / Math.PI;
+}
+// 指の状態：1＝伸びている、0＝曲がっている、0.5＝どちらとも言えない（形の途中・判定が不安定）。
+// 指先が第2関節より手首から十分遠く、第2関節でまっすぐな時だけ「伸びている」とし、
+// はっきり曲がっている時だけ「曲がっている」とする。その間は迷いとして扱い、似た形を取り違えないようにする。
+export function fingerState(pts, mcp, pip, tip) {
+  const ratio = dist(pts[tip], pts[0]) / Math.max(1e-6, dist(pts[pip], pts[0]));
+  const bend = jointAngle(pts[mcp], pts[pip], pts[tip]);
+  if (ratio > 1.12 && bend > 140) return 1;
+  if (ratio < 1.0 || bend < 110) return 0;
+  return 0.5;
+}
 export function fingerExtended(pts, tip, pip) {
-  return dist(pts[tip], pts[0]) > dist(pts[pip], pts[0]) * 1.12;
+  return fingerState(pts, pip - 1, pip, tip) === 1;
 }
-const fingers = (pts) => [[8, 6], [12, 10], [16, 14], [20, 18]].map(([t, p]) => fingerExtended(pts, t, p));
-// 親指が手のひらから離れて立っている（親指の先と人差し指の付け根の距離が、手のひらの幅の0.7倍より大きい）
-export function isThumbOut(pts) {
-  return dist(pts[4], pts[5]) > dist(pts[5], pts[17]) * 0.7;
+const fingers = (pts) => [[5, 6, 8], [9, 10, 12], [13, 14, 16], [17, 18, 20]].map(([m, p, t]) => fingerState(pts, m, p, t));
+const palmWidth = (pts) => Math.max(1e-6, dist(pts[5], pts[17]));
+// 親指の状態：1＝横に立てている、0＝たたんでいる、0.5＝どちらとも言えない
+export function thumbState(pts) {
+  const w = palmWidth(pts);
+  const toIndex = dist(pts[4], pts[5]) / w, toMiddle = dist(pts[4], pts[9]) / w;
+  if (toIndex > 0.75 && toMiddle > 0.95) return 1;
+  if (toIndex < 0.6 || toMiddle < 0.7) return 0;
+  return 0.5;
 }
-// 手の形を1つに分類する：'open' | 'fist' | 'point' | 'pistol' | 'spider' | null（どれでもない）
+export const isThumbOut = (pts) => thumbState(pts) === 1;
+// 人差し指の向き（画面上で上向きなら 1、真横なら 0、下向きなら -1）。指が短く見える（カメラへ向けている）時は null
+export function indexUpness(pts) {
+  const dx = pts[8][0] - pts[5][0], dy = pts[8][1] - pts[5][1];
+  const len = Math.hypot(dx, dy);
+  if (len < palmWidth(pts) * 0.5) return null;
+  return dy / len;
+}
+// 手の形を1つに分類する：'open' | 'fist' | 'point' | 'pistol' | 'spider' | null（どれでもない・迷っている）
+// ・point（火）：人差し指だけを「上へ」立てる
+// ・pistol（HOOK）：人差し指を「横・前へ」向け、親指を立てる
+// 火とピストルは指の向きで分けるので、親指の形が少しあいまいでも取り違えない。
+// 点の y は上向き（シーン座標）を前提にする。
 export function classifyHand(pts) {
-  const [i, m, r, s] = fingers(pts);
-  if (i && m && r && s) return 'open';
-  if (!i && !m && !r && !s) return 'fist';
-  if (i && !m && !r && s) return 'spider';
-  if (i && !m && !r && !s) return isThumbOut(pts) ? 'pistol' : 'point';
+  const f = fingers(pts);
+  const [i, m, r, s] = f;
+  if (f.every((x) => x === 1)) return 'open';
+  if (f.every((x) => x === 0)) return 'fist';
+  if (i === 1 && m === 0 && r === 0 && s === 1) return 'spider';
+  if (i === 1 && m === 0 && r === 0 && s === 0) {
+    const up = indexUpness(pts);
+    if (up === null) return null;
+    if (up > 0.7) return 'point';                               // 上へ（45°以内）
+    if (up < 0.5 && thumbState(pts) === 1) return 'pistol';     // 横・前へ（60°以上傾く）＋親指
+    return null;
+  }
   return null;
 }
 export const isPointing = (pts) => classifyHand(pts) === 'point';
-export const isFist = (pts) => fingers(pts).every((e) => !e);
-export const isOpenHand = (pts) => fingers(pts).every(Boolean);
+export const isFist = (pts) => fingers(pts).every((e) => e === 0);
+export const isOpenHand = (pts) => fingers(pts).every((e) => e === 1);
+
+// 手の形のゆれを抑える：直近 window フレームのうち need 回以上同じ形の時だけ、その形を返す
+export function createStableLabel({ window = 6, need = 4 } = {}) {
+  const history = [];
+  return {
+    update(label) {
+      history.push(label);
+      if (history.length > window) history.shift();
+      const counts = new Map();
+      for (const l of history) if (l !== null) counts.set(l, (counts.get(l) ?? 0) + 1);
+      for (const [l, n] of counts) if (n >= need) return l;
+      return null;
+    },
+    reset() { history.length = 0; },
+  };
+}
 
 // 同じ手の形を hold 秒続けた時に1回だけ、その形を返す。形を変えるまで次は返さない
 export function createGestureTrigger({ hold = 0.2 } = {}) {

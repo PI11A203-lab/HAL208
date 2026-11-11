@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  GADGET_KINDS, GESTURE_TO_GADGET, classifyHand, createChargeController, createGestureTrigger, createPunchDetector, elbowAngle,
-  fingerExtended, isAimPose, isFist, isOpenHand, isPointing, shotDuration, shotPhase,
+  GADGET_KINDS, GESTURE_TO_GADGET, classifyHand, createChargeController, createGestureTrigger, createPunchDetector, createStableLabel,
+  elbowAngle, fingerExtended, fingerState, indexUpness, isAimPose, isFist, isOpenHand, isPointing, shotDuration, shotPhase, thumbState,
 } from '../project-chrome/js/gadget-logic.js';
 import { FLAME, GADGET } from '../project-chrome/js/config.js';
 
@@ -19,6 +19,11 @@ function hand(extended, thumb = false) {
     if (extended[f]) { pts[d] = [x, 65, 0]; pts[t] = [x, 75, 0]; } else { pts[d] = [x, 48, 0]; pts[t] = [x, 38, 0]; }
   });
   return pts;
+}
+// 手首を中心に deg 度回す（正で反時計回り。-90 で指が右を向く）
+function rotate(pts, deg) {
+  const a = deg * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+  return pts.map(([x, y, z]) => [x * c - y * sn, x * sn + y * c, z]);
 }
 
 test('発射前と動作終了後は何も動いていない（全種類）', () => {
@@ -80,16 +85,48 @@ test('指の形：人差し指だけ・拳・開いた手を見分ける', () =>
 });
 
 test('手の形を5種類に分類する', () => {
-  assert.equal(classifyHand(hand([1, 0, 0, 0])), 'point', '人差し指だけ（親指はたたむ）');
-  assert.equal(classifyHand(hand([1, 0, 0, 0], true)), 'pistol', 'ピストル');
+  assert.equal(classifyHand(hand([1, 0, 0, 0])), 'point', '人差し指だけを上へ');
+  assert.equal(classifyHand(rotate(hand([1, 0, 0, 0], true), -90)), 'pistol', '人差し指を横へ＋親指＝ピストル');
+  assert.equal(classifyHand(rotate(hand([1, 0, 0, 0], true), 90)), 'pistol', '左向きのピストル');
   assert.equal(classifyHand(hand([1, 0, 0, 1])), 'spider', '人差し指と小指');
   assert.equal(classifyHand(hand([1, 0, 0, 1], true)), 'spider', '親指を立てても NET');
   assert.equal(classifyHand(hand([0, 0, 0, 0])), 'fist');
   assert.equal(classifyHand(hand([1, 1, 1, 1], true)), 'open');
   assert.equal(classifyHand(hand([1, 1, 0, 0])), null, 'ピースは何もしない');
-  assert.equal(isPointing(hand([1, 0, 0, 0], true)), false, 'ピストルでは火はつかない');
   assert.equal(GESTURE_TO_GADGET.spider, 'net');
   assert.equal(GESTURE_TO_GADGET.pistol, 'hook');
+});
+
+test('火とピストルは人差し指の向きで分け、取り違えない', () => {
+  assert.equal(classifyHand(hand([1, 0, 0, 0], true)), 'point', '上へ向けていれば親指が開いていても火');
+  assert.equal(isPointing(rotate(hand([1, 0, 0, 0], true), -90)), false, '横へ向けたピストルでは火はつかない');
+  assert.equal(classifyHand(rotate(hand([1, 0, 0, 0]), -90)), null, '横へ向けても親指をたたんでいればピストルではない');
+  assert.equal(classifyHand(rotate(hand([1, 0, 0, 0], true), -55)), null, '上と横の間（あいまい）は何もしない');
+  assert.ok(indexUpness(hand([1, 0, 0, 0])) > 0.99);
+  assert.ok(Math.abs(indexUpness(rotate(hand([1, 0, 0, 0]), -90))) < 1e-9);
+});
+
+test('指と親指は 伸びている／曲がっている／あいまい の3段階で判定する', () => {
+  const half = hand([1, 0, 0, 1]);
+  half[11] = [-2, 58, 0]; half[12] = [3, 60, 0];               // 中指が半分曲がっている
+  assert.equal(fingerState(half, 9, 10, 12), 0.5);
+  assert.equal(classifyHand(half), null, '中指があいまいな時は NET にしない');
+  assert.equal(fingerState(hand([1, 0, 0, 0]), 5, 6, 8), 1);
+  assert.equal(fingerState(hand([1, 0, 0, 0]), 9, 10, 12), 0);
+  assert.equal(thumbState(hand([1, 0, 0, 0])), 0);
+  assert.equal(thumbState(hand([1, 0, 0, 0], true)), 1);
+});
+
+test('手の形は数フレーム続いた時だけ採用する', () => {
+  const st = createStableLabel({ window: 6, need: 4 });
+  assert.equal(st.update('point'), null);
+  st.update('point'); st.update('point');
+  assert.equal(st.update('point'), 'point', '4フレーム続いた');
+  assert.equal(st.update('pistol'), 'point', '一瞬だけ別の形になっても変わらない');
+  st.update(null); st.update(null); st.update(null);
+  assert.equal(st.update(null), null, '手が見えなくなると消える');
+  st.reset();
+  assert.equal(st.update('open'), null);
 });
 
 test('同じ手の形を保つと1回だけ発射し、形を変えるまで次を出さない', () => {

@@ -94,6 +94,16 @@ const FIRE_FRAG = /* glsl */`
     uv = clamp(uv, vec2(0.004), vec2(0.996));
     float n = cols * rows, f = floor(frame), t = frame - f;
     vec3 c = mix(cell(mod(f, n), uv), cell(mod(f + 1.0, n), uv), t);
+    // 付け根：画像の下端で切れて見えないよう、細く暗くしてから立ち上げる。火は根元を青くする（ろうそく・ガスの炎のように）
+    float y = vUv.y;
+    float rise = smoothstep(0.0, 0.15, y);
+    float width = mix(0.06, 0.5, smoothstep(0.0, 0.3, y));
+    float taper = smoothstep(width, width * 0.45, abs(vUv.x - 0.5));
+    float blueZone = (1.0 - smoothstep(0.08, 0.24, y)) * (1.0 - swap);
+    vec3 blue = vec3(0.2, 0.45, 1.0) * dot(c, vec3(0.4, 0.4, 0.2));
+    c = mix(c, blue, blueZone * 0.8);
+    // 根元は暗く、上へ行くほど明るい（白く飛ばない）
+    c *= rise * mix(0.45, 1.0, smoothstep(0.12, 0.4, y)) * mix(taper, 1.0, smoothstep(0.15, 0.35, y));
     c = mix(c, c.bgr * vec3(0.75, 0.95, 1.15), swap);
     gl_FragColor = vec4(c * intensity, 1.0);
     #include <colorspace_fragment>
@@ -209,7 +219,7 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
         const flick = 1 + 0.06 * Math.sin(time * 23 + i * 2) + 0.04 * Math.sin(time * 37 + i);
         p.scale.set(w * (i ? 0.85 : 1), w * flick * (i ? 0.9 : 1), 1);
         p.material.uniforms.frame.value = time * FIRE_FLIPBOOK.fps + offsets[i];
-        p.material.uniforms.intensity.value = level * (i ? 0.55 : 1);
+        p.material.uniforms.intensity.value = level * (i ? 0.4 : 0.85);
       });
       if (heat) {
         heat.visible = visible && high && Boolean(fx.videoTexture);

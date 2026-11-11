@@ -73,7 +73,7 @@ project-chrome/
 `js/arms.js` には Three.js の `GLTFLoader` を使う `loadGLB()` を用意しています。読み込んだモデルを既存の追跡グループに追加する処理は、モデルの原点・向き・スケールを確認してから接続してください。
 
 APPLY すると、選んだ装備のGLBモデル（MK-I：`arm-mk1.glb`、NEON EDGE：`arm-neon.glb`、TITAN FRAME：`arm-titan.glb`）を読み込んで表示します。モデルが読み込めない場合は案内を出し、円柱・球体の腕で表示を続けます。
-ARMS の `GADGET` は初期設定で AUTO になっており、手の形と動きでギミックが変わります（人差し指だけ＝火、腕を上げて手を開く→握る＝PLASMA、人差し指と小指＝NET、ピストルの形＝HOOK、拳で肘を勢いよく伸ばす＝FIST。画面左下に操作ガイドを表示）。PLASMA / NET / HOOK / FIST を1つ選んだ時は、腕をまっすぐ伸ばして肩の高さより上に向けると溜まり、腕を下ろすか拳を開くと発射します（`▶ FIRE（テスト）`・Gキーでもすぐ発射）。人差し指だけを立てると指先に火が点きます。炎や弾の光の表現は `js/flame.js`・`js/fx.js`・`js/bloom.js`、炎の画像は `assets/fx/` です。FPS が低い時は TRACKING SETTINGS の `Effects quality` を LOW にします。
+ARMS の `GADGET` は初期設定で AUTO になっており、手の形と動きでギミックが変わります（人差し指だけを上へ＝火、腕を上げて手を開く→握る＝PLASMA、人差し指と小指＝NET、人差し指を横に向けたピストルの形＝HOOK、拳で肘を勢いよく伸ばす＝FIST。画面左下に操作ガイドを表示）。PLASMA / NET / HOOK / FIST を1つ選んだ時は、腕をまっすぐ伸ばして肩の高さより上に向けると溜まり、腕を下ろすか拳を開くと発射します（`▶ FIRE（テスト）`・Gキーでもすぐ発射）。人差し指だけを上へ立てると指先に火が点きます。炎や弾の光の表現は `js/flame.js`・`js/fx.js`・`js/bloom.js`、炎の画像は `assets/fx/` です。FPS が低い時は TRACKING SETTINGS の `Effects quality` を LOW にします。
 
 APPLY すると、部品が上腕 → 前腕 → 手 → 指の順に飛んできてはまる装着演出が流れます（人が映ってから始まります）。クロームには実際の部屋が映り、部屋の明るさ・色に照明が合います（`Room reflections` で切り替え）。効果音は最初のクリックの後から鳴り、`Sound`・`Volume` または M キーで調整できます（`assets/sfx/README.md`）。
 腕の太さは、カメラに映った人の腕の実際の幅に合わせて自動で変わります。GLBの腕では、手を追跡して指が1本ずつ動きます（初回は手の追跡モデルの読み込みに数秒かかります）。

@@ -11,7 +11,7 @@ import { ASSEMBLY_STAGES, ASSEMBLY_TIMING, assemblyDuration, lockedBetween } fro
 import { createFlash, createSparks } from "./fx.js";
 import { playSfx, setLoop, setSfxMuted, setSfxVolume, sfxMuted, stopAllLoops, unlockAudio } from "./sfx.js";
 import { createChargeController, createGestureTrigger, createPunchDetector, shotPhase, shotDuration, isAimPose, elbowAngle,
-         classifyHand, isFist, isOpenHand, GESTURE_TO_GADGET } from "./gadget-logic.js";
+         classifyHand, createStableLabel, isFist, isOpenHand, GESTURE_TO_GADGET } from "./gadget-logic.js";
 import { earShape } from "./face.js";
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -455,8 +455,16 @@ function fireGadget(now) {
 }
 
 // AUTO：手の形とパンチの動きから発射する。PLASMA の溜めに使う「構え」を返す
+// 手の形（数フレーム続いた形だけを採用し、形を変える途中の一瞬の形では発射しない）
+const handLabels = ARMS.map(() => createStableLabel({ window: 6, need: 4 }));
+const currentLabel = ARMS.map(() => null);
+function updateHandLabel(i, pts) {
+  currentLabel[i] = handLabels[i].update(pts ? classifyHand(pts) : null);
+  return currentLabel[i];
+}
+
 function autoGestures(i, pts, angle, aiming, now) {
-  const label = pts ? classifyHand(pts) : null;
+  const label = currentLabel[i];
   gadget.labels[i] = label;
   const dir = gadget.curDir[i];
   // ロケットパンチ：拳を握って肘を勢いよく伸ばす（手が見えない時は腕の動きだけで判定）
@@ -464,8 +472,12 @@ function autoGestures(i, pts, angle, aiming, now) {
   // NET・HOOK：手の形を少し保つと発射
   const g = gadget.triggers[i].update(now, label);
   if (g && GESTURE_TO_GADGET[g]) startShot(i, 1, false, now, dir, GESTURE_TO_GADGET[g]);
-  // PLASMA：腕を上げて手を開いている間に溜まり、拳を握る（または腕を下ろす）と発射
-  return aiming && (!pts || label === "open");
+  // PLASMA：腕を上げて手を開くと溜め始め、拳を握る（または腕を下ろす）と発射。
+  // 溜めている間は、手の形が一瞬あいまいになっても（null）発射しない
+  if (!aiming) return false;
+  if (!pts) return true;
+  if (gadget.ctrls[i].mode === "charging") return label === "open" || label === null;
+  return label === "open";
 }
 
 // s：{ el, wr（シーン座標の THREE.Vector3）, thickness, hand（handPose の結果か null） }。戻り値：手をずらす量
@@ -514,7 +526,7 @@ function applyShake(dt) {
 // 人差し指だけを立てると、指先に火がつく（手を追跡している時のみ）
 function updateFlame(arm, hand, now) {
   const i = ARMS.indexOf(arm), st = pointing[i];
-  const on = Boolean(hand) && classifyHand(hand.points) === "point";
+  const on = Boolean(hand) && currentLabel[i] === "point";
   if (on) { if (st.since === null) st.since = now; } else st.since = null;
   const lit = on && now - st.since >= FLAME.holdSec;
   if (lit && !st.lit) playSfx("flame-ignite", { volume: 0.8 });   // 火が点いた瞬間
@@ -565,7 +577,7 @@ function updateArm(arm, now) {
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
   view?.setVisible(show);
-  if (!show) { updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
+  if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   const m = arm.m;
@@ -577,6 +589,7 @@ function updateArm(arm, now) {
   const base = upperR;
 
   const hand = view?.hasFingers ? handPose(arm, wr.toArray(), now) : null;
+  updateHandLabel(ARMS.indexOf(arm), hand?.points ?? null);
   const handOffset = updateGadget(arm, { el, wr, thickness: foreR, hand }, now);
   updateFlame(arm, hand, now);
 
