@@ -6,7 +6,7 @@
 // ・エネルギーネット（網目が光り、波打ちながら広がる）
 // 光る物は markGlow でブルーム（bloom.js）の対象にします。
 import * as THREE from 'three';
-import { ADD_LIGHT, markGlow } from './flame.js';
+import { ADD_LIGHT, LIGHT_ALPHA, lightLinesMaterial, markGlow } from './flame.js';
 
 const VERT = /* glsl */`
   varying vec2 vUv;
@@ -39,15 +39,16 @@ const ORB_FRAG = /* glsl */`
     vec2 p = vUv * 2.0 - 1.0;
     float r = length(p), a = atan(p.y, p.x);
     float n = fbm(vec2(a * 1.6 + time * 1.7, r * 3.0 - time * 5.0));
-    float body = smoothstep(0.72, 0.15, r + (n - 0.5) * 0.45);
-    float core = smoothstep(0.32, 0.0, r);
+    float body = (1.0 - smoothstep(0.15, 0.72, r + (n - 0.5) * 0.45));
+    float core = (1.0 - smoothstep(0.0, 0.32, r));
     // 電気の筋：ノイズの等高線を細く光らせる
     float e = fbm(vec2(a * 2.5 + time * 3.1, r * 2.2 - time * 7.0) + floor(time * 14.0) * 0.37);
-    float arc = smoothstep(0.035, 0.0, abs(e - 0.5)) * smoothstep(1.0, 0.45, r) * smoothstep(0.15, 0.35, r);
+    float arc = (1.0 - smoothstep(0.0, 0.035, abs(e - 0.5))) * (1.0 - smoothstep(0.45, 1.0, r)) * smoothstep(0.15, 0.35, r);
     float halo = exp(-r * r * 5.0) * 0.35;
     vec3 c = color * (body * 1.4 + halo) + vec3(1.0) * core * 1.6 + mix(color, vec3(1.0), 0.6) * arc * 1.8;
     gl_FragColor = vec4(c * alpha, 1.0);
     #include <colorspace_fragment>
+    ${LIGHT_ALPHA}
   }`;
 export function createPlasmaOrb() {
   return fxQuad(fxMaterial(ORB_FRAG), 13);
@@ -63,10 +64,11 @@ const FLASH_FRAG = /* glsl */`
     float rays = pow(abs(cos(a * 3.0 + seed)), 18.0) + 0.6 * pow(abs(cos(a * 5.0 + seed * 2.0)), 30.0);
     rays *= 0.6 + 0.8 * noise(vec2(a * 4.0, seed * 10.0));
     float glow = exp(-r * r * 9.0);
-    float v = glow * 1.5 + rays * smoothstep(1.0, 0.0, r) * 1.2;
+    float v = glow * 1.5 + rays * (1.0 - smoothstep(0.0, 1.0, r)) * 1.2;
     vec3 c = mix(color, vec3(1.0), smoothstep(0.2, 0.9, glow)) * v;
     gl_FragColor = vec4(c * alpha, 1.0);
     #include <colorspace_fragment>
+    ${LIGHT_ALPHA}
   }`;
 export function createFlash() {
   return fxQuad(fxMaterial(FLASH_FRAG, { seed: { value: 0 } }), 14);
@@ -81,11 +83,12 @@ const RING_FRAG = /* glsl */`
     float r = length(p), a = atan(p.y, p.x);
     float edge = 0.55 + 0.4 * progress;
     float w = 0.05 + 0.12 * (1.0 - progress);
-    float ring = smoothstep(w, 0.0, abs(r - edge)) * (0.7 + 0.6 * noise(vec2(a * 6.0, time * 3.0)));
-    float inner = smoothstep(edge, 0.0, r) * 0.25 * (1.0 - progress);
+    float ring = (1.0 - smoothstep(0.0, w, abs(r - edge))) * (0.7 + 0.6 * noise(vec2(a * 6.0, time * 3.0)));
+    float inner = (1.0 - smoothstep(0.0, edge, r)) * 0.25 * (1.0 - progress);
     vec3 c = mix(color, vec3(1.0), 0.35) * (ring + inner);
     gl_FragColor = vec4(c * alpha, 1.0);
     #include <colorspace_fragment>
+    ${LIGHT_ALPHA}
   }`;
 export function createShockwave() {
   return fxQuad(fxMaterial(RING_FRAG, { progress: { value: 0 } }), 12);
@@ -99,7 +102,7 @@ export function createSparks(max = 60) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, depthTest: false, ...ADD_LIGHT });
+  const mat = lightLinesMaterial();
   const lines = new THREE.LineSegments(geo, mat);
   lines.frustumCulled = false;
   lines.renderOrder = 15;
@@ -213,16 +216,17 @@ const NET_FRAG = /* glsl */`
     // ひし形の網目
     vec2 g = vec2(p.x + p.y, p.x - p.y) * 7.0;
     vec2 f = abs(fract(g) - 0.5);
-    float line = smoothstep(0.08, 0.0, min(f.x, f.y) - 0.0);
-    float knot = smoothstep(0.16, 0.0, length(f - 0.5)) ;
+    float line = (1.0 - smoothstep(0.0, 0.08, min(f.x, f.y) - 0.0));
+    float knot = (1.0 - smoothstep(0.0, 0.16, length(f - 0.5))) ;
     // ふちの太いロープ
-    float rim = smoothstep(0.05, 0.0, abs(r - 0.96));
+    float rim = (1.0 - smoothstep(0.0, 0.05, abs(r - 0.96)));
     // 網を走る電気のちらつき
     float zap = smoothstep(0.75, 1.0, noise(vec2(g.x * 0.7 + time * 9.0, g.y * 0.7 - time * 7.0)));
-    float v = (line * (0.55 + 0.9 * zap) + knot * 0.9 + rim * 1.2) * smoothstep(1.0, 0.85, r) + rim * 0.4;
+    float v = (line * (0.55 + 0.9 * zap) + knot * 0.9 + rim * 1.2) * (1.0 - smoothstep(0.85, 1.0, r)) + rim * 0.4;
     vec3 c = mix(color, vec3(1.0), zap * 0.5 + knot * 0.3) * v;
     gl_FragColor = vec4(c * alpha, 1.0);
     #include <colorspace_fragment>
+    ${LIGHT_ALPHA}
   }`;
 export function createEnergyNet() {
   const mat = new THREE.ShaderMaterial({

@@ -1,22 +1,14 @@
 // 炎・光の表示（指先の火、ロケットフィストの噴射、チャージの光）。
 // 炎の本体は、流体シミュレーションで計算した炎の連番画像（assets/fx/fire-flipbook.jpg、8×8コマ）を
-// 板に貼って再生します。そこに、周りの映像のゆらぎ（熱かげろう）、火の粉、煙、腕を照らす光を重ねます。
+// 板に貼って再生します。そこに、火の粉、煙、腕を照らす光を重ねます。
 // 作り方は assets/fx/README.md を参照してください。
 import * as THREE from 'three';
 import { FIRE_FLIPBOOK } from './config.js';
 
-// 画質：'high'（熱かげろう・煙・炎2枚重ね）/ 'low'（炎1枚と火の粉・光だけ）
-const fx = { quality: 'high', video: null, width: 1, height: 1, videoTexture: null };
-export function configureFx({ quality, video, width, height } = {}) {
+// 画質：'high'（煙・炎2枚重ね・ブルーム）/ 'low'（炎1枚と火の粉・光だけ）
+const fx = { quality: 'high' };
+export function configureFx({ quality } = {}) {
   if (quality) fx.quality = quality;
-  if (video && video !== fx.video) {
-    fx.video = video;
-    fx.videoTexture?.dispose();
-    fx.videoTexture = new THREE.VideoTexture(video);
-    // 映像はそのままの色で描き直すため、色空間の変換はしない（HEAT_FRAG も変換しない）
-  }
-  if (width) fx.width = width;
-  if (height) fx.height = height;
 }
 export const fxQuality = () => fx.quality;
 
@@ -73,9 +65,49 @@ function loadFireTexture() {
   return fireTexture;
 }
 
-// 光を足すだけの合成（透明なキャンバスの不透明度は変えない。そのため黒い部分が映像を隠さない）
+// 光を足す合成。キャンバスは映像の上に重ねる透明な層で、ブラウザーは「色 ≦ 不透明度」（前乗算アルファ）を前提に重ねる。
+// 色だけを足して不透明度を 0 のままにすると、Mac の Chrome などでは光が消えたり欠けたりするため、
+// シェーダーの最後で LIGHT_ALPHA により不透明度を色の明るさ（RGBの最大値）にそろえ、色と一緒に足す。
+// 黒い部分は不透明度 0 のままなので映像を隠さず、明るい部分ほど光の色に置き換わる。
 export const ADD_LIGHT = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
-  blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor };
+  blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
+export const LIGHT_ALPHA = /* glsl */'gl_FragColor.a = clamp(max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b), 0.0, 1.0);';
+
+// 光の粒（火の粉）：中心が明るい丸。色は頂点ごと、size はピクセル
+export function lightPointsMaterial(size = 4) {
+  return new THREE.ShaderMaterial({
+    uniforms: { size: { value: size } },
+    vertexShader: /* glsl */`
+      uniform float size; varying vec3 vColor;
+      void main() { vColor = color; gl_PointSize = size; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vColor;
+      void main() {
+        float r = length(gl_PointCoord - 0.5) * 2.0;
+        float g = (1.0 - smoothstep(0.0, 1.0, r));
+        gl_FragColor = vec4(vColor * g * g, 1.0);
+        #include <colorspace_fragment>
+        ${LIGHT_ALPHA}
+      }`,
+    vertexColors: true, transparent: true, depthWrite: false, depthTest: false, ...ADD_LIGHT,
+  });
+}
+// 光の線（火花の筋）：色は頂点ごと
+export function lightLinesMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: /* glsl */`
+      varying vec3 vColor;
+      void main() { vColor = color; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vColor;
+      void main() {
+        gl_FragColor = vec4(vColor, 1.0);
+        #include <colorspace_fragment>
+        ${LIGHT_ALPHA}
+      }`,
+    vertexColors: true, transparent: true, depthWrite: false, depthTest: false, ...ADD_LIGHT,
+  });
+}
 
 // 炎の連番画像を再生する板。swap：1 で色を青系に入れ替える（噴射用）
 const FIRE_VERT = /* glsl */`
@@ -98,7 +130,7 @@ const FIRE_FRAG = /* glsl */`
     float y = vUv.y;
     float rise = smoothstep(0.0, 0.15, y);
     float width = mix(0.06, 0.5, smoothstep(0.0, 0.3, y));
-    float taper = smoothstep(width, width * 0.45, abs(vUv.x - 0.5));
+    float taper = (1.0 - smoothstep(width * 0.45, width, abs(vUv.x - 0.5)));
     float blueZone = (1.0 - smoothstep(0.08, 0.24, y)) * (1.0 - swap);
     vec3 blue = vec3(0.2, 0.45, 1.0) * dot(c, vec3(0.4, 0.4, 0.2));
     c = mix(c, blue, blueZone * 0.8);
@@ -107,6 +139,7 @@ const FIRE_FRAG = /* glsl */`
     c = mix(c, c.bgr * vec3(0.75, 0.95, 1.15), swap);
     gl_FragColor = vec4(c * intensity, 1.0);
     #include <colorspace_fragment>
+    ${LIGHT_ALPHA}
   }`;
 
 function makeFirePlane(swap, flip) {
@@ -125,21 +158,6 @@ function makeFirePlane(swap, flip) {
   return mesh;
 }
 
-// 熱かげろう：炎の上の映像を、ゆらぐノイズでずらして描き直す（映像を three.js に読み込むため HIGH の時だけ）
-const HEAT_FRAG = /* glsl */`
-  uniform sampler2D video; uniform vec2 screen; uniform float time; uniform float strength;
-  varying vec2 vUv;
-  float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
-  void main() {
-    vec2 p = vUv * vec2(3.0, 6.0) - vec2(0.0, time * 2.2);
-    vec2 d = vec2(noise(p) - 0.5, noise(p + 17.3) - 0.5);
-    float mask = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.55, vUv.y) * smoothstep(0.5, 0.15, abs(vUv.x - 0.5));
-    vec2 uv = gl_FragCoord.xy / screen + d * strength * mask / screen;
-    gl_FragColor = vec4(texture2D(video, uv).rgb, mask);
-  }`;
-
 // 炎を作る。variant：'fire'（指先の火）/ 'blue'（ロケットの噴射）
 // update(dt, origin, scale, up)：origin＝炎の付け根 [x,y,z]（null で消していく）、scale＝炎の幅（ピクセル）、up＝炎の向き
 export function createFlame({ variant = 'fire', light = true, embers = 40, smoke = 10 } = {}) {
@@ -149,18 +167,6 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
   const offsets = [Math.random() * 64, Math.random() * 64];
   group.add(...planes);
 
-  // 熱かげろう
-  let heat = null;
-  if (variant === 'fire') {
-    heat = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
-      uniforms: { video: { value: null }, screen: { value: new THREE.Vector2(1, 1) }, time: { value: 0 }, strength: { value: 6 } },
-      vertexShader: FIRE_VERT, fragmentShader: HEAT_FRAG, transparent: true, depthWrite: false, depthTest: false,
-    }));
-    heat.geometry.translate(0, 0.5, 0);
-    heat.renderOrder = 5;
-    heat.frustumCulled = false;
-    group.add(heat);
-  }
 
   // 火の粉
   const ePos = new Float32Array(embers * 3), eCol = new Float32Array(embers * 3);
@@ -169,8 +175,7 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
   const eGeo = new THREE.BufferGeometry();
   eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
   eGeo.setAttribute('color', new THREE.BufferAttribute(eCol, 3));
-  const eMat = new THREE.PointsMaterial({ size: 4, map: makeGlowTexture(), vertexColors: true, transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false });
+  const eMat = lightPointsMaterial(4);
   const emberPoints = new THREE.Points(eGeo, eMat);
   emberPoints.frustumCulled = false;
   emberPoints.renderOrder = 11;
@@ -221,20 +226,6 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
         p.material.uniforms.frame.value = time * FIRE_FLIPBOOK.fps + offsets[i];
         p.material.uniforms.intensity.value = level * (i ? 0.4 : 0.85);
       });
-      if (heat) {
-        heat.visible = visible && high && Boolean(fx.videoTexture);
-        if (heat.visible) {
-          heat.position.copy(last).addScaledVector(upV, w * 0.3);
-          heat.position.z += 3;
-          heat.rotation.set(0, 0, angle);
-          heat.scale.set(w * 1.1, w * 2.6, 1);
-          const u = heat.material.uniforms;
-          u.video.value = fx.videoTexture;
-          u.screen.value.set(fx.width, fx.height);
-          u.time.value = time;
-          u.strength.value = lastScale * 0.25 * level;
-        }
-      }
       // 火の粉：炎の中から舞い上がる
       if (on && embers) {
         emberAcc += dt * 26;
@@ -257,7 +248,7 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
         const flicker = 0.6 + 0.4 * Math.sin(time * 30 + i * 7);
         eCol.set([emberColor.r * k * flicker, emberColor.g * k * k * flicker, emberColor.b * k * k * flicker], i * 3);
       }
-      eMat.size = Math.max(2, lastScale * 0.09);
+      eMat.uniforms.size.value = Math.max(3, lastScale * 0.14);
       eGeo.attributes.position.needsUpdate = true;
       eGeo.attributes.color.needsUpdate = true;
       // 煙：炎の先から立ちのぼって広がる
@@ -296,7 +287,6 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
     },
     dispose() {
       planes.forEach((p) => { p.geometry.dispose(); p.material.dispose(); });
-      heat?.geometry.dispose(); heat?.material.dispose();
       eGeo.dispose(); eMat.dispose();
       puffs.forEach((p) => p.material.dispose());
       lamp?.dispose();

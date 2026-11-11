@@ -74,7 +74,6 @@ try {
 }
 
 const W = video.videoWidth, H = video.videoHeight;
-configureFx({ video, width: W, height: H });          // 熱かげろうで映像を使う
 skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
 document.getElementById("camdot").className = "on";
