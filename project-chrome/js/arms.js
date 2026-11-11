@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FINGER_BONES, findMissingParts, segmentPose } from './arm-model.js';
+import { stageProgress } from './assembly.js';
 
 export function loadGLB(url, onLoaded, onError = console.warn) {
   const loader = new GLTFLoader();
@@ -101,6 +102,7 @@ export function createArmView(template, model, { mirror = false } = {}) {
   const basis = new THREE.Matrix4();
   const ax = new THREE.Vector3(), ay = new THREE.Vector3(), az = new THREE.Vector3();
   const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+  const offset = new THREE.Vector3(), shift = new THREE.Matrix4();
   const setPose = (holder, pose) => {
     pos.fromArray(pose.position);
     basis.makeBasis(ax.fromArray(pose.xAxis), ay.fromArray(pose.yAxis), az.fromArray(pose.zAxis));
@@ -110,6 +112,16 @@ export function createArmView(template, model, { mirror = false } = {}) {
     else holder.matrix.compose(pos, quat, scl);
   };
   let disposed = false;
+  // 装着の演出：t＝開始からの秒数（null で演出なし）、from＝部品が飛んでくる方向と距離（シーン座標）
+  const assembly = { t: null, from: new THREE.Vector3(), spin: 0 };
+  const STAGE = { upper: 0, fore: 1, hand: 2 };
+  const zAxis = new THREE.Vector3(0, 0, 1), spinQ = new THREE.Quaternion();
+  const flyIn = (holder, stage) => {
+    const k = 1 - stageProgress(assembly.t, stage);
+    if (k === 0) return;
+    holder.position.addScaledVector(assembly.from, k);
+    holder.quaternion.premultiply(spinQ.setFromAxisAngle(zAxis, assembly.spin * k));
+  };
 
   return {
     root,
@@ -118,7 +130,8 @@ export function createArmView(template, model, { mirror = false } = {}) {
     // points：{ shoulder, elbow, wrist, handTip }（シーン座標の [x, y, z]）
     // thickness：腕の太さ（ピクセル）。数値、または部品ごとの { upper, fore, hand }
     // hand：手を追跡している時 { points: 21点（シーン座標、0番＝手首）, back: 手の甲の向き, radius: 手のひらの幅の半分 }
-    applyPose(points, thickness, hand = null) {
+    // handOffset：手と指をまとめてずらす量 [x, y, z]（ロケットフィストで手が飛ぶ時）
+    applyPose(points, thickness, hand = null, handOffset = null) {
       const tracked = hasFingers && hand !== null;
       for (const [key, { holder, spec }] of Object.entries(parts)) {
         const t = typeof thickness === 'number' ? thickness : thickness[key];
@@ -130,6 +143,8 @@ export function createArmView(template, model, { mirror = false } = {}) {
           setPose(holder, segmentPose(points[spec.from], points[spec.to], spec, t));
         }
       }
+      if (assembly.t !== null) for (const [key, { holder }] of Object.entries(parts)) flyIn(holder, STAGE[key] ?? 0);
+      if (handOffset && handPart) handPart.holder.position.add(offset.fromArray(handOffset));
       if (!hasFingers) return;
       if (tracked) {
         const k = hand.radius / (palm.trackRadius ?? 0.15); // モデルの手のひらと同じ比率で指の太さを決める
@@ -143,6 +158,16 @@ export function createArmView(template, model, { mirror = false } = {}) {
           f.holder.matrix.copy(handPart.holder.matrix).multiply(mirrorMatrix).multiply(f.rest).multiply(mirrorMatrix);
         }
       }
+      if (handOffset && tracked) for (const f of fingers) f.holder.matrix.premultiply(shift.makeTranslation(offset.fromArray(handOffset)));
+      if (assembly.t !== null) {
+        const k = 1 - stageProgress(assembly.t, 3);
+        if (k !== 0) for (const f of fingers) f.holder.matrix.premultiply(shift.makeTranslation(offset.copy(assembly.from).multiplyScalar(k * 0.6)));
+      }
+    },
+    // 装着の演出の経過時間を設定する（applyPose の前に呼ぶ）。t が null なら演出を止める
+    setAssembly(t, from = null) {
+      assembly.t = t;
+      if (from) { assembly.from.fromArray(from); assembly.spin = (from[0] >= 0 ? -1 : 1) * 1.3; }
     },
     // design：config.js の DESIGNS の1件（色・粗さ・発光）
     applyAppearance(design) {

@@ -55,3 +55,35 @@ export const ARM_MODELS = {
 // 体格に合わせた腕の太さ（人物の切り抜きマスクから測る）
 // cover：実際の腕より少し太くして覆う倍率、everyFrames：何フレームごとに測るか、smoothing：なめらかさ（小さいほどゆっくり変化）
 export const BODY_FIT = { cover: 1.12, everyFrames: 5, smoothing: 0.2 };
+
+// 腕のギミック（射出装置・弾）。長さ・大きさは前腕の太さ・長さに対する比率です。
+// along：肘から取付位置までの距離（前腕長に対する割合）、out：腕の中心からの高さ（太さに対する倍率）、
+// scale：モデル1単位の大きさ（太さに対する倍率）、barrelTravel：砲身が伸びる量・muzzle：砲身の後端から砲口まで（モデル単位）、
+// range：飛距離（前腕長に対する倍率。溜めるほど伸びる）、netRadius：ネットの半径（太さに対する倍率）、
+// projectileScale：フック・ネット弾の拡大率、fullCharge：満タンまで溜める秒数
+export const GADGET = {
+  url: "./assets/models/gadget-launcher.glb",
+  along: 0.4, out: 0.95, scale: 7, barrelTravel: 0.14, muzzle: 0.27, range: 2.4, netRadius: 3, projectileScale: 1.6, fullCharge: 1.0,
+};
+
+// 指先の火：人差し指だけを立てて holdSec 秒で点く。size：手のひらの幅に対する炎の大きさ
+export const FLAME = { holdSec: 0.2, size: 1.1 };
+
+// 炎の連番画像（流体シミュレーションで作成。assets/fx/README.md）。cols×rows コマ、fps：再生速度、base：画像の下から炎の付け根までの割合
+export const FIRE_FLIPBOOK = { url: "./assets/fx/fire-flipbook.jpg", cols: 8, rows: 8, fps: 30, base: 0.07 };
+
+// 効果音（assets/sfx/。make-sfx.py で合成したオリジナル）。volume：全体の音量、gain：音ごとの音量の補正
+export const SFX = {
+  dir: "./assets/sfx/",
+  volume: 0.8,
+  files: {
+    "charge-loop": "charge-loop.wav", "charge-full": "charge-full.mp3",
+    "plasma-fire": "plasma-fire.mp3", "plasma-hit": "plasma-hit.mp3",
+    "net-fire": "net-fire.mp3", "net-open": "net-open.mp3",
+    "hook-fire": "hook-fire.mp3", "hook-reel": "hook-reel.mp3", "hook-hit": "hook-hit.mp3",
+    "fist-launch": "fist-launch.mp3", "thrust-loop": "thrust-loop.wav", "fist-hit": "fist-hit.mp3",
+    "flame-ignite": "flame-ignite.mp3", "flame-loop": "flame-loop.wav",
+    "assemble-whir": "assemble-whir.mp3", "assemble-lock": "assemble-lock.mp3", "assemble-done": "assemble-done.mp3",
+  },
+  gain: { "assemble-whir": 0.35, "charge-loop": 0.6, "flame-loop": 1.4, "net-open": 1.3, "thrust-loop": 0.8 },
+};

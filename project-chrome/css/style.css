@@ -55,3 +55,26 @@
   .seg button.sel{border-color:#00e5ff;color:#fff;box-shadow:0 0 10px rgba(0,229,255,.3)}
   .sw{display:flex;gap:8px;margin:12px 0}.sw i{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #16363f}
   .note{font-size:10px;color:#7fa3ad;line-height:1.5}
+
+/* 腕のギミック */
+#gadgetMode{grid-template-columns:repeat(3,1fr)}
+.gadget-fire{width:100%;margin:8px 0 4px;padding:9px 0;background:#0c1a22;color:#00e5ff;border:1px solid #16363f;border-radius:6px;cursor:pointer;font-size:11px;letter-spacing:1px}
+.gadget-fire:hover{border-color:#00e5ff}
+.gadget-note{font-size:10px;color:#7fa3ad;line-height:1.5;margin:4px 0 0}
+#chargebox{display:none;position:absolute;left:50%;bottom:64px;transform:translateX(-50%);width:260px;padding:8px 12px;background:rgba(8,20,28,.8);border:1px solid #00e5ff;border-radius:6px;font-size:11px;letter-spacing:2px;color:#4dd0e1}
+#chargebox b{float:right;color:#e6faff}
+#chargebox .bar{margin-top:6px}
+#gesturebox{display:none;position:absolute;left:16px;bottom:64px;width:250px;padding:8px 10px;background:rgba(8,20,28,.8);border:1px solid #16363f;border-radius:6px;font-size:11px;color:#9fc3cc}
+#gesturebox b{display:block;margin-bottom:4px;font-size:10px;letter-spacing:2px;color:#4dd0e1}
+#gesturebox div{display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;transition:background .15s,color .15s}
+#gesturebox span{width:18px;text-align:center}
+#gesturebox em{margin-left:auto;font-style:normal;font-size:10px;letter-spacing:1px;color:#00e5ff}
+#gesturebox div.on{background:rgba(0,229,255,.18);color:#e6faff}
+#assemblybox{display:none;position:absolute;left:50%;top:16px;transform:translateX(-50%);width:300px;padding:10px 12px;background:rgba(8,20,28,.82);border:1px solid #00e5ff;border-radius:6px;font-size:11px;letter-spacing:1.5px;color:#9fc3cc}
+#assemblybox b{display:block;margin-bottom:6px;color:#4dd0e1;letter-spacing:2px}
+#assemblybox div{display:flex;align-items:center;gap:6px;padding:2px 0;animation:asmIn .18s ease-out}
+#assemblybox div i{flex:1;border-bottom:1px dotted #2a5560;margin:0 4px 3px}
+#assemblybox em{font-style:normal;color:#00e5ff}
+#assemblybox div.done{margin-top:4px;color:#e6faff}
+#assemblybox div.done em{margin-left:auto}
+@keyframes asmIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
