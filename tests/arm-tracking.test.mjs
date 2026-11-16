@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isFiniteNumber, isFinitePoint, landmarkToPixel, pixelToScene,
-  trackState, armAge, segment, shoulderWidth, clampZStep,
+  trackState, armAge, segment, shoulderWidth, clampZStep, gateZByVis, reprojectXY,
   cross, normalize, handOrientation, TRACK_SEC, HOLD_SEC,
 } from '../project-chrome/js/arm-tracking.js';
 
@@ -109,6 +109,55 @@ test('clampZStep は初回（prevZ非有限）と異常新値を安全に扱う'
 test('clampZStep は maxDelta<=0 で制限しない', () => {
   assert.equal(clampZStep(100, 999, 0), 999);
   assert.equal(clampZStep(100, 999, -5), 999);
+});
+
+test('gateZByVis は vis が閾値未満のときzを凍結し、以上のとき更新する', () => {
+  // 実測の荒ぶり：vis0.53の手首が大きく飛ぶ → 凍結して前回値を保持
+  assert.equal(gateZByVis(100, 250, 0.53, 0.7), 100);  // vis<0.7 → 凍結
+  assert.equal(gateZByVis(100, 250, 0.65, 0.7), 100);  // 飛びの帯(0.65)も凍結
+  assert.equal(gateZByVis(100, 250, 0.7, 0.7), 250);   // ちょうど閾値は更新側
+  assert.equal(gateZByVis(100, 250, 0.95, 0.7), 250);  // 高信頼 → 更新
+});
+
+test('gateZByVis は初回（prevZ非有限）は保持すべき値がないので newZ を通す', () => {
+  assert.equal(gateZByVis(NaN, 250, 0.1, 0.7), 250);       // 低visでも初回は通す
+  assert.equal(gateZByVis(Infinity, 250, 0.1, 0.7), 250);
+});
+
+test('gateZByVis は異常値（newZ・vis非有限）を安全側に倒す', () => {
+  assert.equal(gateZByVis(100, NaN, 0.9, 0.7), 100);       // 異常な新値は前回保持
+  assert.equal(gateZByVis(100, Infinity, 0.9, 0.7), 100);
+  assert.equal(gateZByVis(100, 250, NaN, 0.7), 100);       // visが読めない点も信用せず凍結
+});
+
+test('reprojectXY は z=0 の点を動かさない（z=0平面は正射影と一致）', () => {
+  const r = reprojectXY(1000, 300, 0, 640, 360, 1800);
+  assert.ok(Math.abs(r.x - 1000) < 1e-9 && Math.abs(r.y - 300) < 1e-9);
+});
+
+test('reprojectXY は補正後に投影するとz付きでも映像ピクセルへ戻る（ずれ解消）', () => {
+  // レビュアー例：1280x720, camDist=1800, x=1000, シーンZ=192 → 補正なしでは投影後~1043pxにずれる。
+  const cx = 640, camDist = 1800, zScene = 192, xPx = 1000;
+  const corr = reprojectXY(xPx, 360, zScene, cx, 360, camDist);
+  // 補正後のシーンxを透視投影（中心基準で camDist/(camDist-zScene)倍）すると元のxPxに戻る。
+  const projected = cx + (corr.x - cx) * (camDist / (camDist - zScene));
+  assert.ok(Math.abs(projected - xPx) < 1e-6, `投影後=${projected} 期待=${xPx}`);
+});
+
+test('reprojectXY は手前(z>0)で中心から外へ、奥(z<0)で内へオフセットを縮める', () => {
+  const cx = 640, camDist = 1800, xPx = 1000; // 中心より右
+  const near = reprojectXY(xPx, 0, 300, cx, 0, camDist).x;  // z>0：シーンxは中心寄り（投影で外へ戻る）
+  const far = reprojectXY(xPx, 0, -300, cx, 0, camDist).x;  // z<0：シーンxは外寄り（投影で内へ戻る）
+  assert.ok(near < xPx, 'z>0 はシーンxを中心側へ縮める');
+  assert.ok(far > xPx, 'z<0 はシーンxを外側へ広げる');
+});
+
+test('reprojectXY は異常値（camDist非有限/0以下・カメラ面より手前）を素通し', () => {
+  assert.deepEqual(reprojectXY(1000, 300, 100, 640, 360, NaN), { x: 1000, y: 300 });
+  assert.deepEqual(reprojectXY(1000, 300, 100, 640, 360, 0), { x: 1000, y: 300 });
+  // zScene >= camDist：カメラ面以遠（denom<=0）は補正不能 → 素通し
+  assert.deepEqual(reprojectXY(1000, 300, 1800, 640, 360, 1800), { x: 1000, y: 300 });
+  assert.deepEqual(reprojectXY(1000, 300, 2000, 640, 360, 1800), { x: 1000, y: 300 });
 });
 
 test('cross は外積を正しく計算する', () => {

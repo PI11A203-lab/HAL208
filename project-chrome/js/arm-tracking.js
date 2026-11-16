@@ -75,6 +75,35 @@ export function clampZStep(prevZ, newZ, maxDelta) {
   return newZ;
 }
 
+// Z（奥行き）を visibility でゲートする。単眼では点が隠れて visibility が落ちると、
+// モデルが奥行きを「当て推量で乗り換え」、zが0.2〜1.5も飛ぶ（実測）。
+// vis が visFreeze 未満の点は「信用できない」とみなし、zを更新せず prevZ を保持（凍結）する。
+// x/y は別途そのまま追従させる想定（凍結するのは不安定なzだけ）。
+// 異常値は安全側に倒す：newZ が非有限なら prevZ、prevZ が非有限（初回）なら newZ を採用。
+export function gateZByVis(prevZ, newZ, vis, visFreeze) {
+  if (!isFiniteNumber(newZ)) return prevZ;           // 異常な新値は捨てて前回保持
+  if (!isFiniteNumber(prevZ)) return newZ;           // 初回は保持すべき値がないので通す
+  if (!isFiniteNumber(vis)) return prevZ;            // visが読めない点も信用しない
+  if (vis < visFreeze) return prevZ;                 // 信頼度が低い：zを凍結（直前値を保持）
+  return newZ;                                        // 信頼できる点だけ更新
+}
+
+// 透視投影の逆投影補正。
+// カメラを (cx, cy, camDist) に置き z=0平面を見るとき、z≠0 の点は投影で
+// 画面中心 (cx,cy) を基準に camDist/(camDist - zScene) 倍に再拡大され、
+// 映像の追跡点から横にずれる（手前ほど外へ、奥ほど内へ）。
+// そこでシーン座標を作る段階で中心からのオフセットを逆数倍に縮めておき、
+// 投影後にちょうど映像ピクセル (xPx,yPx) へ戻す。
+// camDist が非有限/0以下、または (camDist - zScene) が0以下（カメラ面より手前）の
+// 異常時は補正せず素通し（破綻を避ける）。正射影時は呼ばない想定。
+export function reprojectXY(xPx, yPx, zScene, cx, cy, camDist) {
+  if (!isFiniteNumber(camDist) || camDist <= 0 || !isFiniteNumber(zScene)) return { x: xPx, y: yPx };
+  const denom = camDist - zScene;
+  if (!(denom > 0)) return { x: xPx, y: yPx };
+  const k = denom / camDist; // (camDist - zScene)/camDist：中心オフセットの縮小率
+  return { x: cx + (xPx - cx) * k, y: cy + (yPx - cy) * k };
+}
+
 // ベクトルの外積（3D）。a×b を返す。
 export function cross(a, b) {
   return {

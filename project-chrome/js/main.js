@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { loadGLB } from "./arms.js";
 import { earShape } from "./face.js";
-import { trackState, armAge, shoulderWidth, isFinitePoint, clampZStep, handOrientation, HOLD_SEC } from "./arm-tracking.js";
+import { trackState, armAge, shoulderWidth, isFinitePoint, clampZStep, gateZByVis, reprojectXY, handOrientation, HOLD_SEC } from "./arm-tracking.js";
 import { PoseLandmarker, FaceLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -31,7 +31,7 @@ try {
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
       delegate: "GPU",
     },
     runningMode: "VIDEO",
@@ -165,7 +165,10 @@ function processFrame(result, now) {
     // z（奥行き）は単眼で最も不安定。x/yより弱いカットオフで強めに平滑化し、
     // さらにフレーム間の跳ねを肩幅基準でクランプして「荒ぶり」を抑える（実測ではない推定値）。
     const zFiltered = j.fz.filter((q.z ?? 0) * W, now, minCutoff * ARM_TUNING.zSmoothFactor, BETA);
-    const z = clampZStep(j.p.z, zFiltered, bodyScale * ARM_TUNING.zMaxStepRatio);
+    // ① visゲート：隠れてvisが落ちた点のzは信用せず直前値を凍結（荒ぶりの根元を断つ）。
+    // ② ステップクランプ：凍結を通った更新でも、残る跳ねを肩幅基準で抑える。
+    const zGated = gateZByVis(j.p.z, zFiltered, j.vis, ARM_TUNING.zVisFreeze);
+    const z = clampZStep(j.p.z, zGated, bodyScale * ARM_TUNING.zMaxStepRatio);
     j.p.set(x, y, z);
     j.raw.set(q.x * W, q.y * H);
     j.lastSeen = now;
@@ -182,7 +185,16 @@ const Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
 // ピクセル空間→シーン座標。y軸は上向き（H-y）。
 // zは settings.depth（UI 0..1）× ARM_TUNING.zDepthScale（config）で最終スケール。
 // 透視投影のnearクリップで腕が消えないよう、増幅は控えめにする。
-const conv = p => new THREE.Vector3(p.x, H - p.y, -p.z * settings.depth * ARM_TUNING.zDepthScale);
+// 透視投影時は、zが付くと投影で画面中心基準に再拡大され追跡点からずれるため、
+// reprojectXY で中心オフセットを逆数倍に縮め、投影後に映像ピクセルへ戻す（実腕と一致）。
+// 正射影時は再拡大が起きないので補正しない（そのまま渡す）。
+const conv = p => {
+  const zScene = -p.z * settings.depth * ARM_TUNING.zDepthScale;
+  const yFlip = H - p.y;
+  if (!ARM_TUNING.usePerspective) return new THREE.Vector3(p.x, yFlip, zScene);
+  const r = reprojectXY(p.x, yFlip, zScene, W / 2, H / 2, ARM_TUNING.camDist);
+  return new THREE.Vector3(r.x, r.y, zScene);
+};
 
 function setCyl(mesh, a, b, r) {
   const d = new THREE.Vector3().subVectors(b, a);
@@ -203,17 +215,7 @@ function updateArm(arm, now) {
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   // 非有限座標なら描画をスキップ（契約：異常点でモデルを跳ばさない）。
-  if (!isFinitePoint(sh) || !isFinitePoint(el) || !isFinitePoint(wr)) {
-    if (now - dbgLast > 1) console.warn("[arm-debug] 非有限座標で描画スキップ", arm.name, { sh, el, wr });
-    return;
-  }
-  if (now - dbgLast > 1 && arm.name === "Left arm") { // 1秒ごとに1回だけ状態を出す
-    dbgLast = now;
-    console.log("[arm-debug]", arm.name, "state=", arm.state, "age=", age.toFixed(3),
-      "showArm=", settings.showArm, "visible=", arm.g.visible,
-      "elbowScene=", { x: el.x.toFixed(0), y: el.y.toFixed(0), z: el.z.toFixed(0) },
-      "bodyScale=", bodyScale.toFixed(1));
-  }
+  if (!isFinitePoint(sh) || !isFinitePoint(el) || !isFinitePoint(wr)) return;
   const m = arm.m;
   const base = bodyScale * ARM_TUNING.thickBase * settings.thick * design.thick;
 
@@ -484,7 +486,6 @@ function updateHud(now) {
 
 /* ---------------- メインループ ---------------- */
 let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0;
-let dbgLast = -Infinity; // 一時：腕が出ない原因の自己診断ログ用スロットル
 
 function loop() {
   if (video.currentTime !== lastVideoTime) {
