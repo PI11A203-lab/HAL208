@@ -8,7 +8,7 @@
   "scripts": {
     "lint": "eslint project-chrome/js scripts tests eslint.config.mjs",
     "lint:fix": "eslint project-chrome/js scripts tests eslint.config.mjs --fix",
-    "test": "node --test tests/tracking.test.mjs tests/assets.test.mjs tests/pr-policy.test.mjs",
+    "test": "node --test tests/tracking.test.mjs tests/assets.test.mjs tests/pr-policy.test.mjs tests/experience.test.mjs",
     "check:pr": "node scripts/check-pr.mjs"
   },
   "devDependencies": {
