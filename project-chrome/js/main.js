@@ -395,15 +395,32 @@ const pointing = ARMS.map(() => ({ since: null }));
 let frameDt = 1 / 30;
 const ease01 = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 
+// 1本の腕のギミックの状態（溜め・発射中の弾・ジェスチャー判定・指先の火）を初期状態に戻す。
+// 追跡を失った時と RESET の時に呼び、溜めた時間や弾が後から復活しないようにする
+function resetArmGadget(i) {
+  gadget.ctrls[i].reset();
+  gadget.shots[i] = null;
+  gadget.triggers[i].reset();
+  gadget.punches[i].reset();
+  gadget.labels[i] = null;
+  handLabels[i].reset();
+  currentLabel[i] = null;
+  pointing[i].since = null;
+  pointing[i].lit = false;
+}
+
+// すべての腕のギミックの状態を初期化し、続いている音（溜め・火・噴射）も止める
+function resetGadgetState() {
+  ARMS.forEach((_, i) => resetArmGadget(i));
+  wasFull = false;
+  stopAllLoops();
+}
+
 function clearGadget() {
   gadget.requests.cancel();
   gadget.views?.forEach(v => v.dispose());
   gadget.views = null;
-  gadget.shots = ARMS.map(() => null);
-  gadget.ctrls.forEach(c => c.reset());
-  gadget.triggers.forEach(t => t.reset());
-  gadget.punches.forEach(p => p.reset());
-  gadget.labels = ARMS.map(() => null);
+  resetGadgetState();
 }
 
 async function setGadgetKind(kind) {
@@ -482,6 +499,8 @@ function autoGestures(i, pts, angle, aiming, now) {
 // s：{ el, wr（シーン座標の THREE.Vector3）, thickness, hand（handPose の結果か null） }。戻り値：手をずらす量
 function updateGadget(arm, s, now) {
   const i = ARMS.indexOf(arm), view = gadget.views?.[i];
+  // 追跡を失った時は、この腕の溜め・弾・判定を取り消す（画面外にいた時間が溜めに加わらないように）
+  if (!s) resetArmGadget(i);
   if (!view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
   view.setVisible(true);
   const ctrl = gadget.ctrls[i];
@@ -842,6 +861,7 @@ $("reset").onclick = () => {
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
   clearArmModel();
+  resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
   setGadgetKind("auto");
 };
 $("gadgetMode").onclick = e => { const g = e.target.dataset.g; if (g) setGadgetKind(g); };

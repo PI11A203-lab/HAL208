@@ -221,7 +221,7 @@ export function createChargeController({ minHold = 0.15, fullCharge = 1.0, autoF
     },
     // 動作が終わるまで新しい溜めを受け付けない
     busy(untilTime) { busyUntil = untilTime; mode = 'idle'; self.charge = 0; self.held = 0; },
-    reset() { mode = 'idle'; busyUntil = -Infinity; armed = true; self.charge = 0; self.held = 0; },
+    reset() { mode = 'idle'; busyUntil = -Infinity; armed = true; sawFist = false; fullAt = null; self.charge = 0; self.held = 0; },
   };
   return self;
 }

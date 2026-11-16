@@ -238,3 +238,17 @@ test('炎の連番画像があり、コマ数と画像の大きさが設定と�
   assert.equal(size[1] % FIRE_FLIPBOOK.rows, 0);
   assert.ok(data.length < 512 * 1024);
 });
+
+test('追跡を失って reset した後は、離れていた時間を溜めに加えず、勝手に発射しない', () => {
+  const c = createChargeController({ minHold: 0.1, fullCharge: 1, autoFire: 10 });
+  c.update(0, { aiming: true });
+  c.update(0.5, { aiming: true });
+  assert.equal(c.mode, 'charging');
+  c.reset();                                                   // 画面の外へ出た
+  assert.equal(c.mode, 'idle');
+  assert.equal(c.charge, 0);
+  assert.equal(c.update(5, { aiming: false }), null, '戻って腕を下ろしても発射しない');
+  c.update(5.1, { aiming: true });
+  c.update(5.4, { aiming: true });
+  assert.ok(c.charge < 0.5, '溜めは戻ってから数え直す');
+});
