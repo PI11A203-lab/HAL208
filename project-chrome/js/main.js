@@ -22,14 +22,14 @@ const skelCanvas = document.getElementById("skel");
 const skelCtx = skelCanvas.getContext("2d");
 const info = document.getElementById("info");
 
-/* ---------------- Ayarlar ---------------- */
+/* ---------------- 設定 ---------------- */
 // 初期設定は config.js から読み込みます。
 const settings = { ...DEFAULTS };
 const VIS_MIN = 0.5;      // この信頼度未満の点は更新しない
 const HOLD_SEC = 0.6;     // 検出が途切れた点の最終位置を保持する時間（秒）
 const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位）
 
-/* ---------------- One Euro filtresi ---------------- */
+/* ---------------- One Euro フィルター ---------------- */
 import { OneEuro } from './tracking.js';
 
 
@@ -80,7 +80,7 @@ document.getElementById("camdot").className = "on";
 document.getElementById("cam").textContent = "ONLINE"; document.getElementById("cam").className = "ok";
 document.getElementById("camres").textContent = `WEBCAM (${W}×${H})`;
 
-/* ---------------- three.js sahnesi ---------------- */
+/* ---------------- three.jsシーン ---------------- */
 // 正射影カメラ：1単位＝動画の1ピクセル、y軸は上向き（そのため y = H - y_ピクセル）
 const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
 renderer.setPixelRatio(1);
@@ -101,7 +101,7 @@ const camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
 camera.position.z = 2000;
 const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
-/* ---------------- Robot kol modeli ---------------- */
+/* ---------------- ロボットアームモデル ---------------- */
 const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
 const jointMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
 const neonMat  = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
@@ -247,7 +247,7 @@ async function useArmModel(id) {
   }
 }
 
-/* ---------------- Eklem durumu ---------------- */
+/* ---------------- 関節疾患 ---------------- */
 const JOINTS = [11, 12, 13, 14, 15, 16];
 const joints = {};
 function resetJoints() {
