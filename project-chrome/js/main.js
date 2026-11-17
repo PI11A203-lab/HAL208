@@ -31,6 +31,9 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 
 /* ---------------- One Euro フィルター ---------------- */
 import { OneEuro } from './tracking.js';
+import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
+// 装着音の入口（#15）。腕のギミックの効果音（sfx.js）と名前が重ならないよう別名で読む
+import { unlockAudio as unlockEquipSound, playEquip } from './sound.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
@@ -179,7 +182,7 @@ function updateAssembly(now) {
   });
   assemblyFx.sparks.update(frameDt, bodyScale * 4);
   if (!a || armModel.status !== "ready") return;
-  const visible = ARMS.filter(arm => arm.state !== "lost" && settings.showArm);
+  const visible = ARMS.filter(arm => arm.state !== "lost" && armsShown());
   if (a.start === null) {
     if (!visible.length) { armModel.views.forEach(v => v.setAssembly(0)); return; }   // 人が映るまで待つ
     a.start = now;
@@ -314,7 +317,7 @@ async function ensureHandLandmarker() {
 }
 
 function processHands(t0, now) {
-  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !settings.showArm) return;
+  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !armsShown()) return;
   const res = handLm.detectForVideo(video, t0);
   const hands = res.landmarks ?? [];
   if (!hands.length) return;
@@ -581,7 +584,7 @@ function updateChargeHud() {
   $("chargeval").textContent = c >= 1 ? "MAX" : Math.round(c * 100) + "%";
   // 操作ガイド：AUTO の時だけ表示し、いま認識している手の形を光らせる
   const guide = $("gesturebox");
-  guide.style.display = gadget.kind === "auto" && settings.showArm ? "block" : "none";
+  guide.style.display = gadget.kind === "auto" && armsShown() ? "block" : "none";
   const seen = new Set(gadget.labels.filter(Boolean));
   if (gadget.ctrls.some(x => x.mode === "charging")) seen.add("open");
   guide.querySelectorAll("[data-gs]").forEach(el => el.classList.toggle("on", seen.has(el.dataset.gs)));
@@ -591,7 +594,7 @@ function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  const show = settings.showArm && age < HOLD_SEC;
+  const show = armsShown() && age < HOLD_SEC;
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
   view?.setVisible(show);
@@ -798,7 +801,9 @@ const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-settings.showArm = false; // APPLYを押すまで腕は表示しない
+let exp = createExperience(); // APPLYを押すまで腕は表示しない
+// 腕（簡易形状・GLB・ギミック）を表示するのは体験フェーズ（ACTION）の時だけ（#15）
+function armsShown() { return exp.phase === PHASES.ACTION; }
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -822,13 +827,59 @@ function renderCards() {
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
+const EQUIP_MS = 1000;
+let equipTimer = null;
+function cancelEquip() {
+  if (equipTimer !== null) clearTimeout(equipTimer);
+  equipTimer = null;
+}
+function syncPhaseUI() {
+  const action = exp.phase === PHASES.ACTION;
+  document.body.classList.toggle("phase-action", action);
+  $("back").hidden = !action;
+  $("help").hidden = !action;
+  if (!action) $("guide").hidden = true;
+  $("reset").hidden = action;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+}
 $("apply").onclick = () => {
-  applyDesign(DESIGNS[selected]); settings.showArm = true;
+  if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
+  unlockEquipSound();
+  playEquip();
+  applyDesign(DESIGNS[selected]);
   gadget.views?.forEach(v => v.applyAppearance(design));
-  if (design.model) { useArmModel(design.model); return; }   // GLBモデルがある装備
-  clearArmModel();
-  say(DESIGNS[selected].name + " を適用しました。");
+  if (design.model) useArmModel(design.model);                // GLBモデルがある装備（ACTION になると装着演出が始まる）
+  else clearArmModel();
+  const id = exp.requestId;
+  cancelEquip();
+  equipTimer = setTimeout(() => {
+    equipTimer = null;
+    exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: id }); // 古い完了は experience.js が無視する
+    syncPhaseUI();
+  }, EQUIP_MS);
+  syncPhaseUI();
+  say("装着中…");
 };
+$("back").onclick = () => {
+  cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  exp = reduceExperience(exp, { type: EVENTS.BACK });
+  resetGadgetState(); // 溜め・弾・判定・音を持ち越さない
+  syncPhaseUI();
+  say("装備選択に戻りました。");
+};
+$("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
+let staffOpen = false;
+function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
+window.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.shiftKey && (e.key === "R" || e.key === "r")) { e.preventDefault(); setStaffConfirm(true); return; }
+  if (!staffOpen) return;
+  if (e.key === "Enter") { e.preventDefault(); setStaffConfirm(false); doReset(); }
+  else if (e.key === "Escape") setStaffConfirm(false);
+});
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
@@ -852,29 +903,44 @@ $("roomEnv").onchange = e => {
   roomEnv.enabled = e.target.checked;
   if (!e.target.checked) { key.color.set(0xffffff); key.intensity = 1.2; }
 };
-$("reset").onclick = () => {
-  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
+function doReset() {
+  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
+  cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
   ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
-  face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
+  // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
+  face.ears = false; face.earSize = 1; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
+  $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
+  $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
+  document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
+  applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
   clearArmModel();
   resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
   setGadgetKind("auto");
-};
+  // タブを初期表示（ARMS）へ戻す
+  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
+  $("apply").style.display = "";
+  syncPhaseUI();
+}
+$("reset").onclick = doReset;
 $("gadgetMode").onclick = e => { const g = e.target.dataset.g; if (g) setGadgetKind(g); };
 $("gadgetFire").onclick = () => fireGadget(performance.now() / 1000);
 document.addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "g" && !(e.target instanceof HTMLInputElement)) fireGadget(performance.now() / 1000);
 });
 renderCards();
+syncPhaseUI();
 setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
-  $("apply").style.display = t.dataset.t === "arms" ? "" : "none";
+  $("apply").style.display = "";
 });
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");
 $("eyeSw").onclick = e => { const c = e.target.dataset.c; if (c) { face.eyeCol = c; $("eyeCol").value = c; } };
@@ -884,6 +950,43 @@ $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face
 $("ears").onchange = e => face.ears = e.target.checked;
 $("earSize").oninput = e => face.earSize = +e.target.value;
 $("earCol").oninput = e => earMat.color.set(e.target.value);
+/* ---------------- 撮影（PNG保存） #11 ---------------- */
+import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
+const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
+const shotCtx = shotCanvas.getContext("2d");
+const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+// 体験中はパネルが隠れるため、案内はボタン自体にも短く表示する
+const CAPTURE_LABEL = $("capture").textContent;
+let captureMsgTimer = null;
+function captureMsg(t) {
+  say(t);
+  $("capture").textContent = t;
+  clearTimeout(captureMsgTimer);
+  captureMsgTimer = setTimeout(() => { $("capture").textContent = CAPTURE_LABEL; }, 2000);
+}
+$("capture").onclick = () => {
+  if (!capture.request()) { captureMsg(capture.busy ? "保存処理中です" : "カメラの準備ができていません"); return; }
+  $("capture").disabled = true;
+  captureMsg("撮影中...");
+};
+function endCapture() { capture.finish(); $("capture").disabled = false; }
+function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+// renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
+function runCapture() {
+  if (!capture.take()) return;
+  try {
+    composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
+  } catch (e) {
+    console.warn("撮影の合成に失敗:", e.message);
+    captureMsg("撮影に失敗しました");
+    endCapture();
+    return;
+  }
+  canvasToPngBlob(shotCanvas)
+    .then(blob => { downloadBlob(blob, makeFileName(), { doc: document, urlApi: URL }); captureMsg("ダウンロードを開始しました"); })
+    .catch(e => { console.warn("PNG保存に失敗:", e.message); captureMsg("保存に失敗しました"); })
+    .finally(endCapture);
+}
 
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
@@ -933,6 +1036,7 @@ function loop() {
   applyShake(frameDt);
   if (roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
   bloom.render(scene, camera);
+  runCapture();                                               // 描画（ブルーム込み）の直後に撮影する（#11）
   requestAnimationFrame(loop);
 }
 loop();
