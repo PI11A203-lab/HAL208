@@ -77,5 +77,6 @@ body.phase-action #stage { width: 100%; max-width: calc((100vh - 100px) * 16 / 9
 
 /* ---- 体験画面：GUIDEボタンをTRACKING表示と同じ背景に ---- */
 #help { background: rgba(8,20,28,.85); border-color: #0e4a58; color: #cfe8ee; }
-  .capture-btn { width: 100%; margin-top: 10px; padding: 12px 0; border-radius: 6px; font-size: 12px; letter-spacing: 2px; cursor: pointer; font-weight: 600; }
-  .capture-btn:disabled { opacity: .5; cursor: wait; }
+/* ---- 撮影ボタン（#11）：選択中・体験中のどちらでも映像の右下に表示 ---- */
+#capture { background: rgba(8,20,28,.85); border: 1px solid #0e4a58; color: #cfe8ee; }
+#capture:disabled { opacity: .5; cursor: wait; }
