@@ -410,6 +410,7 @@ $("apply").onclick = () => {
 };
 $("back").onclick = () => {
   cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   syncPhaseUI();
   say("装備選択に戻りました。");
@@ -430,6 +431,7 @@ $("thick").oninput = e => settings.thick = +e.target.value;
 function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
@@ -463,6 +465,44 @@ $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face
 $("ears").onchange = e => face.ears = e.target.checked;
 $("earSize").oninput = e => face.earSize = +e.target.value;
 $("earCol").oninput = e => earMat.color.set(e.target.value);
+
+/* ---------------- 撮影（PNG保存） #11 ---------------- */
+import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
+const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
+const shotCtx = shotCanvas.getContext("2d");
+const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+// 体験中はパネルが隠れるため、案内はボタン自体にも短く表示する
+const CAPTURE_LABEL = $("capture").textContent;
+let captureMsgTimer = null;
+function captureMsg(t) {
+  say(t);
+  $("capture").textContent = t;
+  clearTimeout(captureMsgTimer);
+  captureMsgTimer = setTimeout(() => { $("capture").textContent = CAPTURE_LABEL; }, 2000);
+}
+$("capture").onclick = () => {
+  if (!capture.request()) { captureMsg(capture.busy ? "保存処理中です" : "カメラの準備ができていません"); return; }
+  $("capture").disabled = true;
+  captureMsg("撮影中...");
+};
+function endCapture() { capture.finish(); $("capture").disabled = false; }
+function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+// renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
+function runCapture() {
+  if (!capture.take()) return;
+  try {
+    composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
+  } catch (e) {
+    console.warn("撮影の合成に失敗:", e.message);
+    captureMsg("撮影に失敗しました");
+    endCapture();
+    return;
+  }
+  canvasToPngBlob(shotCanvas)
+    .then(blob => { downloadBlob(blob, makeFileName(), { doc: document, urlApi: URL }); captureMsg("ダウンロードを開始しました"); })
+    .catch(e => { console.warn("PNG保存に失敗:", e.message); captureMsg("保存に失敗しました"); })
+    .finally(endCapture);
+}
 
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
@@ -503,6 +543,7 @@ function loop() {
     updateHud(now);
   }
   renderer.render(scene, camera);
+  runCapture();
   requestAnimationFrame(loop);
 }
 loop();
