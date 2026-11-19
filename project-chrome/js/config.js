@@ -6,6 +6,11 @@ export const EAR_MODEL = {
   id: 'cyber-ears', name: 'PROTOTYPE 04',
   url: './assets/models/ears-prototype-04.glb', faceWidthScale: 0.42,
 };
+export const EAR_MODELS = {
+  glb: EAR_MODEL,
+  rabbit: { id: 'rabbit-led', name: 'RABBIT LED',
+    url: './assets/models/ears-rabbit-led.glb', faceWidthScale: 0.30, led: true },
+};
 
 export const DESIGNS = {
   mk1:   { name: "MK-I", desc: "ミニマルな産業用義手。", long: "強度と耐久性を高めた基本的な機械式アーム。信頼性が高く汎用的な標準モデル。",

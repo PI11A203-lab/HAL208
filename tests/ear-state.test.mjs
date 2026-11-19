@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEarController, findEarNodes } from '../project-chrome/js/ear-state.js';
+import { createEarController, findEarNodes, createEarMaterialControls } from '../project-chrome/js/ear-state.js';
 
 function deferred() {
   let resolve, reject;
@@ -16,6 +16,49 @@ function tree(name, children = [], isMesh = false) {
   return node;
 }
 const ear = name => tree(name, [tree('shell', [], true)]);
+
+test('LEDの色と消灯は外殻・内板へ伝播せず、猫耳にLEDを要求しない', () => {
+  const mat = name => ({ name, color: { value: 'original', set(v) { this.value = v; } },
+    emissive: { value: 'original', set(v) { this.value = v; } }, emissiveIntensity: 0 });
+  const shell = mat('EarShell'), led = mat('EarLED'), inner = mat('EarInner');
+  const root = { traverse(fn) { fn({ material: [shell, led, inner] }); } };
+  const controls = createEarMaterialControls(root, { led: true });
+  controls.applyLED('#00e5ff', true);
+  assert.equal(led.emissive.value, '#00e5ff');
+  assert.equal(led.emissiveIntensity, 1.25);
+  assert.equal(shell.color.value, 'original');
+  assert.equal(inner.color.value, 'original');
+  controls.applyColor('#112233');
+  assert.equal(shell.color.value, '#112233');
+  assert.equal(led.color.value, '#00e5ff');
+  controls.applyLED('#ff9fc9', false);
+  assert.equal(led.emissiveIntensity, 0);
+  assert.equal(inner.color.value, 'original');
+  const cat = { traverse(fn) { fn({ material: shell }); } };
+  assert.doesNotThrow(() => createEarMaterialControls(cat));
+  assert.throws(() => createEarMaterialControls(cat, { led: true }), /EarLED/);
+});
+
+test('異なるモデルの遅延完了を破棄し、切替済み資産を一度だけ解放する', async () => {
+  const cat = deferred(), rabbit = deferred();
+  const oldModel = asset(), newModel = asset();
+  const calls = [];
+  const controller = createEarController({ load: id => {
+    calls.push(id); return id === 'glb' ? cat.promise : rabbit.promise;
+  } });
+  const first = controller.setEnabled(true, 'glb');
+  const second = controller.setEnabled(true, 'rabbit');
+  rabbit.resolve(newModel); await second;
+  cat.resolve(oldModel); await first;
+  assert.deepEqual(calls, ['glb', 'rabbit']);
+  assert.equal(controller.asset, newModel);
+  assert.equal(oldModel.disposed, 1);
+  controller.setEnabled(false, 'classic');
+  assert.equal(newModel.disposed, 1);
+  assert.equal(controller.asset, null);
+  controller.dispose();
+  assert.equal(newModel.disposed, 1);
+});
 
 test('左右の名前付きnodeを順序に依存せず取得する', () => {
   const left = ear('EarLeft'), right = ear('EarRight');
