@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findHairOffsets } from '../project-chrome/js/hair-fit.js';
+import { findHairOffsets, fitEarAnchor } from '../project-chrome/js/hair-fit.js';
+import { EAR_MODELS } from '../project-chrome/js/config.js';
+
+test('ウサギ耳だけを頭頂寄りへ集め、猫耳と手動補正量を維持する', () => {
+  for (const side of [-1, 1]) {
+    for (const source of [{ u: side * .52, v: .05 }, { u: side * .70, v: .32 }]) {
+      const rabbit = fitEarAnchor(source, EAR_MODELS.rabbit, side);
+      assert.ok(Math.abs(rabbit.u) < Math.abs(source.u) * .65);
+      assert.ok(rabbit.v > source.v);
+      assert.deepEqual(fitEarAnchor(source, EAR_MODELS.glb, side), source);
+      const manual = fitEarAnchor(source, EAR_MODELS.rabbit, side, .1, -.05);
+      assert.ok(Math.abs(manual.u - rabbit.u - side * .1) < 1e-10);
+      assert.ok(Math.abs(manual.v - rabbit.v + .05) < 1e-10);
+    }
+  }
+});
 
 function fixture(angle = 0, scale = 80, origin = { x: 128, y: 125 }) {
   const frame = { origin, faceWidth: scale, imageWidth: 256, imageHeight: 256,

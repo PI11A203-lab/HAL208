@@ -9,7 +9,8 @@ export const EAR_MODEL = {
 export const EAR_MODELS = {
   glb: EAR_MODEL,
   rabbit: { id: 'rabbit-led', name: 'RABBIT LED',
-    url: './assets/models/ears-rabbit-led.glb', faceWidthScale: 0.30, led: true },
+    url: './assets/models/ears-rabbit-led.glb', faceWidthScale: 0.28, led: true,
+    anchorWidthScale: 0.58, anchorLift: 0.06 },
 };
 
 export const DESIGNS = {

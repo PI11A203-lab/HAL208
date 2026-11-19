@@ -14,14 +14,18 @@ LED colorで内周の色、Inner LEDで点灯/消灯を変更する。Ear color�
 - 外枠前面：glTF Z=+0.17。傾斜した内壁の底：Z=-0.01。実際の凹みは0.18。
 - 内板は厚さ0.035の閉じた板。背板・背面カバーを別に置き、内部は貫通させない。
 - 内周LED中心：Z=+0.035、半径0.012。前縁より奥で、内板より手前に配置。
-- 左右とも高さ約3.39、幅約0.96。原点は根元ヒンジ付近。glTF +Yが上、+Zが正面。
+- 先端を丸くし、上半分の幅を広げたウサギ耳。原点は根元ヒンジ付近。
+  glTF +Yが上、+Zが正面。
 - EarLeft/EarRightは本人の左右。負scaleは使わず、別Meshとして左右を生成する。
 - EarShell / EarInner / EarLED / EarHardware / EarGasket / EarMarkingsを分離。
 - 初期LEDは淡いピンク #ff9fc9。emissiveIntensity=1.25、消灯時=0。
   emissiveだけで周辺を実照明する仕組みではない。bloomは追加していない。
-- GLB：1,181,496 bytes。LED曲線の過剰な分割を減らして軽量化した。
-  表示倍率はEAR_MODELS.rabbit.faceWidthScale=0.30。
+- GLB：1,175,548 bytes。LED曲線の過剰な分割を減らして軽量化した。
+  表示倍率はEAR_MODELS.rabbit.faceWidthScale=0.28。
   猫耳の倍率0.42とは別に設定する。
+- 猫耳用の左右髪輪郭をそのまま使わず、ウサギ耳の横位置は0.58倍、
+  高さは顔幅の0.06だけ上へ補正する。手動の横位置・高さは補正後に加える。
+  髪未検出の推定配置にも同じ補正を適用し、猫耳の配置には影響させない。
 
 ## Blenderで編集・再生成
 原本：`project-chrome/assets/models/ears-rabbit-led.blend`。
@@ -58,10 +62,11 @@ develop向けPRを出す際は、先行PR統合後の差分とcommit履歴を再
 - 自動検査：左右root、配布GLBの実奥行き、LEDの奥行き/材質、色の分離、
   モデル切替時の古い非同期結果の破棄、RESET/解放、既存機能のテスト。
 - `npm ci --ignore-scripts --no-audit --no-fund`、`npm run lint`、`npm test`を実行。
-  Windows / Node.js 20.19.5、自動テスト47件成功。
+  Windows / Node.js 20.19.5、自動テスト48件成功。
 - 一時検証ページで実際のThree.jsローダーを使用し、ウサギ耳の描画、
   ピンク→シアン→LED消灯、猫耳→ウサギ耳の切替を確認。コンソールerrorなし。
   一時ページ・確認用レンダーはrepoに残さない。
-- 実カメラはブラウザーの許可待ち。実カメラの位置・長時間FPS・腕/目同時使用・
-  PNG最終見た目は別途手動確認が必要。
+- 20:52のユーザー提示画像で左右間隔と尖端形状の問題を確認し、形状と位置を補正。
+  ローカルの実カメラでGLB読込、髪輪郭追従、頭頂寄りの間隔と丸い先端を確認。
+  長時間FPS・腕/目同時使用・PNG最終見た目は別途手動確認が必要。
   自動テストやBlenderレンダーだけで成功済みとは扱わない。

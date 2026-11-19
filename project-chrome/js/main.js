@@ -5,6 +5,7 @@ import { earShape } from "./face.js";
 import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
 import { createHairTracker } from './hair-tracking.js';
+import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -383,10 +384,11 @@ function updateFace(now) {
       if (glbEars) {
         const root = glbEars.roots[k];
         // 額の角(103/332)ではなく、頭頂付近の髪の左右輪郭に装着。
-        const anchor = hairOffsets?.[k] ?? { u: side * 0.52, v: 0.05 };
+        const anchor = fitEarAnchor(hairOffsets?.[k] ?? { u: side * 0.52, v: 0.05 },
+          EAR_MODELS[face.earModel], side, face.earSpread, face.earLift);
         root.position.copy(P(10))
-          .addScaledVector(right, faceW * (anchor.u + side * face.earSpread))
-          .addScaledVector(up, faceW * (anchor.v + face.earLift));
+          .addScaledVector(right, faceW * anchor.u)
+          .addScaledVector(up, faceW * anchor.v);
         // 外向きの輪郭はモデル自体に含む。頭の姿勢のみ適用し二重に傾けない。
         root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fw));
         root.scale.setScalar(faceW * EAR_MODELS[face.earModel].faceWidthScale * face.earSize);
