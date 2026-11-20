@@ -2,6 +2,11 @@
 // 新しいアームのデザインは DESIGNS に追加します。
 export const DEFAULTS = { smooth: 0.5, depth: 0.5, thick: 1, showArm: true, showSkel: false };
 
+export const EAR_MODEL = {
+  id: 'cyber-ears', name: 'PROTOTYPE 04',
+  url: './assets/models/ears-prototype-04.glb', faceWidthScale: 0.42,
+};
+
 export const DESIGNS = {
   mk1:   { name: "MK-I", desc: "ミニマルな産業用義手。", long: "強度と耐久性を高めた基本的な機械式アーム。信頼性が高く汎用的な標準モデル。",
            metal: 0xaab2ba, rough: 0.28, joint: 0x1a1e24, neon: 0x00e5ff, glow: 1.2, thick: 1.0, stats: [50, 45, 60], css: ["#aab2ba", "#1a1e24", "#00e5ff"] },
