@@ -104,3 +104,24 @@ body.phase-action #stage { width: 100%; max-width: calc((100vh - 100px) * 16 / 9
 /* ---- 撮影ボタン（#11）：選択中・体験中のどちらでも映像の右下に表示 ---- */
 #capture { background: rgba(8,20,28,.85); border: 1px solid #0e4a58; color: #cfe8ee; }
 #capture:disabled { opacity: .5; cursor: wait; }
+
+/* ---- 仮想購入（#22）：映像の上に重ねる。撮影する画像（video・canvas）には入らない ---- */
+#buy { background: linear-gradient(90deg, #ffb300, #ffd54f); color: #2a1a00; border: 0; }
+#buy[hidden], #purchase[hidden], #purchase [hidden] { display: none; }
+body.purchasing #actionBar { display: none; }
+#purchase { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; }
+#purchase:not([data-phase="countdown"]) { background: rgba(4,10,16,.55); }
+#purchase .pBox { max-width: min(560px, 92%); padding: 22px 26px; background: rgba(8,20,28,.95); border: 1px solid #0e4a58; border-radius: 10px; text-align: center; color: #cfe8ee; font-size: 14px; line-height: 1.7; }
+#purchase .pBox > b { display: block; color: #4dd0e1; letter-spacing: 2px; font-size: 16px; margin-bottom: 8px; }
+#purchase .pBox p { margin: 8px 0; }
+#purchase .pFree { color: #ffb300; font-size: 12px; letter-spacing: 1px; }
+#purchase .pErr { border-color: #ffb300; }
+#purchase img { display: block; width: 100%; max-height: 52vh; object-fit: contain; margin: 10px 0; border-radius: 6px; background: #000; }
+#purchase canvas { position: static; display: block; width: 240px; height: 240px; margin: 12px auto; transform: none; image-rendering: pixelated; border-radius: 6px; }
+#purchase small { display: block; color: #9bb8c0; font-size: 11px; }
+.pBtns { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.pBtns button { padding: 12px 20px; border-radius: 6px; font-size: 13px; letter-spacing: 1px; cursor: pointer; font-weight: 600; background: rgba(8,20,28,.85); border: 1px solid #2a4a54; color: #cfe8ee; }
+.pBtns button.pMain { background: linear-gradient(90deg, #00b8d4, #18ffff); color: #04222a; border: 0; }
+#pCount { text-align: center; color: #fff; text-shadow: 0 0 24px rgba(0,229,255,.9), 0 2px 6px #000; pointer-events: none; }
+#pCountNum { display: block; font-size: 180px; font-weight: 700; line-height: 1; }
+#pCount small { font-size: 18px; letter-spacing: 2px; color: #fff; }
