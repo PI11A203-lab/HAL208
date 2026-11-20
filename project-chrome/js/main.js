@@ -4,6 +4,10 @@ import { loadGLB, loadArmTemplate, createArmView } from "./arms.js";
 import { createRequestTracker, handTip, handBackNormal, assignHands } from "./arm-model.js";
 import { measureWidth, createSmoother } from "./body-fit.js";
 import { earShape } from "./face.js";
+import { createEarController } from './ear-state.js';
+import { loadEarAsset } from './ear-model.js';
+import { createHairTracker } from './hair-tracking.js';
+import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -22,13 +26,15 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 
 /* ---------------- One Euro filtresi ---------------- */
 import { OneEuro } from './tracking.js';
+import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
+import { unlockAudio, playEquip } from './sound.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
-let landmarker, faceLm, visionFiles;
+let landmarker, faceLm, vision, visionFiles;
 try {
   info.textContent = "モデルを読み込み中（インターネット接続が必要）...";
-  const vision = await FilesetResolver.forVisionTasks(
+  vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   visionFiles = vision;
   landmarker = await PoseLandmarker.createFromOptions(vision, {
@@ -65,6 +71,7 @@ try {
 }
 
 const W = video.videoWidth, H = video.videoHeight;
+const hairTracker = createHairTracker(vision);
 skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
 document.getElementById("camdot").className = "on";
@@ -230,7 +237,7 @@ async function ensureHandLandmarker() {
 }
 
 function processHands(t0, now) {
-  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !settings.showArm) return;
+  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !armsShown()) return;
   const res = handLm.detectForVideo(video, t0);
   const hands = res.landmarks ?? [];
   if (!hands.length) return;
@@ -298,7 +305,7 @@ function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  const show = settings.showArm && age < HOLD_SEC;
+  const show = armsShown() && age < HOLD_SEC;
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
   view?.setVisible(show);
@@ -360,7 +367,7 @@ function drawSkel() {
 }
 
 /* ---------------- 顔モジュール（猫耳・目） ---------------- */
-const face = { ears: false, earSize: 1, eyeMode: "off", eyeCol: "#00e5ff", eyeOp: 0.85, lastSeen: -Infinity };
+const face = { ears: false, earSize: 1, earModel: 'classic', earLEDCol: '#ff9fc9', earLEDOn: true, earCol: '#1b1f25', earSpread: 0, earLift: 0, eyeMode: "off", eyeCol: "#00e5ff", eyeOp: 0.85, lastSeen: -Infinity };
 // ランドマーク番号：10=額、152=顎、234/454=頬、103/332=生え際、468/473=虹彩の中心、469-471/474-476=虹彩の左右端
 const IRIS = [468, 473], IRIS_EDGE = [[469, 471], [474, 476]];
 const LID = [[159, 145], [386, 374]], CORNER = [[33, 133], [362, 263]]; // まぶた（上下）と目尻・目頭
@@ -375,6 +382,7 @@ for (const id of FIDS) fp[id] = { f: [new OneEuro(), new OneEuro(), new OneEuro(
 /* --- 3D猫耳：外殻（面取り付きの金属プレート）＋内側の発光パネル＋根元のカラー＋発光ライン --- */
 const earMat = new THREE.MeshStandardMaterial({ color: 0x1b1f25, metalness: 0.9, roughness: 0.3 });
 const earInMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.4 });
+const earJointMat = jointMat.clone(), earNeonMat = neonMat.clone();
 const outerGeo = new THREE.ExtrudeGeometry(earShape(1), { depth: 0.16, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 14 });
 outerGeo.translate(0, 0, -0.13);   // 厚みの中心を z=0 に合わせる
 const innerGeo = new THREE.ExtrudeGeometry(earShape(0.6), { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 14 });
@@ -382,10 +390,40 @@ innerGeo.translate(0, 0.09, 0.07); // 外殻の前面からわずかに突き出
 const ears = [0, 1].map(() => {
   const g = new THREE.Group();
   const p = { g, shell: new THREE.Mesh(outerGeo, earMat), inner: new THREE.Mesh(innerGeo, earInMat),
-              collar: new THREE.Mesh(cylGeo, jointMat), seam: new THREE.Mesh(boxGeo, neonMat) };
+              collar: new THREE.Mesh(cylGeo, earJointMat), seam: new THREE.Mesh(boxGeo, earNeonMat) };
   g.add(p.shell, p.inner, p.collar, p.seam); g.visible = false; scene.add(g);
   return p;
 });
+let earLoadError = '';
+const earController = createEarController({
+  load: id => loadEarAsset(EAR_MODELS[id].url, EAR_MODELS[id]),
+  onChange: () => {
+    const asset = earController.asset;
+    if (asset) {
+      asset.roots.forEach(root => { if (!root.parent) scene.add(root); });
+      asset.applyColor(face.earCol);
+      asset.applyLED(face.earLEDCol, face.earLEDOn);
+    }
+    document.getElementById('earStatus').textContent = !EAR_MODELS[face.earModel]
+      ? 'CLASSIC：コード生成の耳'
+      : earController.loading ? '耳モデルを読込中…'
+      : asset ? EAR_MODELS[face.earModel].name : earLoadError || '耳をONにするとBlenderモデルを読み込みます。';
+  },
+  onError: () => { earLoadError = 'GLBが未配置または読込に失敗しました。CLASSICの耳を表示します。OFF→ONで再試行できます。'; },
+});
+function syncEarModel() {
+  // 切替・RESET直後にも旧表示を隠す。次の推論フレームを待たない。
+  ears.forEach(ear => { ear.g.visible = false; });
+  earController.asset?.roots.forEach(root => { root.visible = false; });
+  earLoadError = '';
+  hairTracker.reset();
+  document.getElementById('earFitStatus').textContent = !EAR_MODELS[face.earModel]
+    ? '装着位置：輪郭追従はBlenderモデルで利用できます。'
+    : face.ears ? '装着位置：髪の輪郭を確認中'
+    : '装着位置：耳をONにすると髪の輪郭へ配置します。';
+  document.getElementById('earLEDControls').hidden = !EAR_MODELS[face.earModel]?.led;
+  earController.setEnabled(face.ears && Boolean(EAR_MODELS[face.earModel]), face.earModel);
+}
 
 /* --- 目：2Dキャンバスに描画（映像と同じ座標系。CSSで一緒に左右反転される） --- */
 const eyec = document.getElementById("eyec"); eyec.width = W; eyec.height = H;
@@ -461,19 +499,51 @@ function updateFace(now) {
   const ok = now - face.lastSeen < HOLD_SEC;
   const P = id => fp[id].p;
   const earOn = face.ears && ok;
-  ears.forEach(e => e.g.visible = earOn);
+  const glbEars = EAR_MODELS[face.earModel] && earController.enabled ? earController.asset : null;
+  ears.forEach(e => e.g.visible = earOn && !glbEars);
+  earController.asset?.roots.forEach(root => { root.visible = Boolean(earOn && glbEars); });
   if (earOn) {
     const faceW = Math.max(P(454).distanceTo(P(234)), 1);
     const up = new THREE.Vector3().subVectors(P(10), P(152)).normalize();
     const right = new THREE.Vector3().subVectors(P(454), P(234));
     const fw = new THREE.Vector3().crossVectors(right, up).normalize();   // カメラ方向
     right.crossVectors(up, fw).normalize();
+    let hairOffsets = null;
+    if (EAR_MODELS[face.earModel]) {
+      if (now - face.lastSeen < 0.15) {
+        hairTracker.sample(video, now * 1000, {
+          origin: { x: P(10).x, y: H - P(10).y },
+          right: { x: right.x, y: -right.y }, up: { x: up.x, y: -up.y },
+          faceWidth: faceW, imageWidth: W, imageHeight: H,
+        });
+      } else hairTracker.reset();
+      hairOffsets = hairTracker.getOffsets(now * 1000);
+      const fitMessage = hairOffsets ? '装着位置：髪の輪郭に追従中'
+        : hairTracker.loading ? '装着位置：髪の輪郭を準備中（頭の外側へ仮配置）'
+        : '装着位置：頭の外側へ推定配置（横位置・高さで調整できます）';
+      if (document.getElementById('earFitStatus').textContent !== fitMessage) {
+        document.getElementById('earFitStatus').textContent = fitMessage;
+      }
+    }
     [[103, -1], [332, 1]].forEach(([id, side], k) => {
       const dir = up.clone().addScaledVector(right, side * 0.35).normalize(); // 少し外向きに傾ける
       const x = new THREE.Vector3().crossVectors(dir, fw).normalize();
       const z = new THREE.Vector3().crossVectors(x, dir).normalize();
       const earW = faceW * 0.22 * face.earSize, earH = faceW * 0.34 * face.earSize, earT = earW * 0.6;
       const e = ears[k];
+      if (glbEars) {
+        const root = glbEars.roots[k];
+        // 額の角(103/332)ではなく、頭頂付近の髪の左右輪郭に装着。
+        const anchor = fitEarAnchor(hairOffsets?.[k] ?? { u: side * 0.52, v: 0.05 },
+          EAR_MODELS[face.earModel], side, face.earSpread, face.earLift);
+        root.position.copy(P(10))
+          .addScaledVector(right, faceW * anchor.u)
+          .addScaledVector(up, faceW * anchor.v);
+        // 外向きの輪郭はモデル自体に含む。頭の姿勢のみ適用し二重に傾けない。
+        root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fw));
+        root.scale.setScalar(faceW * EAR_MODELS[face.earModel].faceWidthScale * face.earSize);
+        return;
+      }
       e.g.position.copy(P(id)).addScaledVector(up, faceW * 0.03);
       e.g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, dir, z));
       e.shell.scale.set(side * earW, earH, earT); e.inner.scale.copy(e.shell.scale); // 左右対称（片側は反転）
@@ -496,10 +566,12 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT } from './config.js';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, EAR_MODELS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-settings.showArm = false; // APPLYを押すまで腕は表示しない
+let exp = createExperience(); // APPLYを押すまで腕は表示しない
+// 腕（簡易形状・GLB）を表示するのは体験フェーズ（ACTION）の時だけ（#15）
+function armsShown() { return exp.phase === PHASES.ACTION; }
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -520,43 +592,156 @@ function renderCards() {
   $("dname").textContent = d.name; $("ddesc").textContent = d.long;
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
+const EQUIP_MS = 1000;
+let equipTimer = null;
+function cancelEquip() {
+  if (equipTimer !== null) clearTimeout(equipTimer);
+  equipTimer = null;
+}
+function syncPhaseUI() {
+  const action = exp.phase === PHASES.ACTION;
+  document.body.classList.toggle("phase-action", action);
+  $("back").hidden = !action;
+  $("help").hidden = !action;
+  if (!action) $("guide").hidden = true;
+  $("reset").hidden = action;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+}
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 $("apply").onclick = () => {
-  applyDesign(DESIGNS[selected]); settings.showArm = true;
-  if (design.model) { useArmModel(design.model); return; }   // GLBモデルがある装備
-  clearArmModel();
-  say(DESIGNS[selected].name + " を適用しました。");
+  if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
+  unlockAudio();
+  playEquip();
+  applyDesign(DESIGNS[selected]);
+  if (design.model) useArmModel(design.model);                // GLBモデルがある装備（#7）
+  else clearArmModel();
+  const id = exp.requestId;
+  cancelEquip();
+  equipTimer = setTimeout(() => {
+    equipTimer = null;
+    exp = reduceExperience(exp, { type: EVENTS.FINISH_EQUIP, requestId: id }); // 古い完了は experience.js が無視する
+    syncPhaseUI();
+  }, EQUIP_MS);
+  syncPhaseUI();
+  say("装着中…");
 };
+$("back").onclick = () => {
+  cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  exp = reduceExperience(exp, { type: EVENTS.BACK });
+  syncPhaseUI();
+  say("装備選択に戻りました。");
+};
+$("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
+let staffOpen = false;
+function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
+window.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.shiftKey && (e.key === "R" || e.key === "r")) { e.preventDefault(); setStaffConfirm(true); return; }
+  if (!staffOpen) return;
+  if (e.key === "Enter") { e.preventDefault(); setStaffConfirm(false); doReset(); }
+  else if (e.key === "Escape") setStaffConfirm(false);
+});
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
-$("reset").onclick = () => {
-  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false, showArm: false });
+function doReset() {
+  Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
+  cancelEquip();
+  cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
   ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
-  face.ears = false; face.eyeMode = "off"; $("ears").checked = false;
+  // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
+  face.ears = false; face.earSize = 1; face.earModel = 'classic'; face.earCol = '#1b1f25'; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
+  face.earLEDCol = '#ff9fc9'; face.earLEDOn = true;
+  $("earLEDCol").value = face.earLEDCol; $("earLEDOn").checked = true;
+  $("earModel").value = 'classic'; syncEarModel();
+  face.earSpread = 0; face.earLift = 0;
+  $("earSpread").value = 0; $("earLift").value = 0;
+  $("earFitStatus").textContent = '装着位置：髪の輪郭を基準に配置します。';
+  $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
+  $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
+  document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
+  applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
   clearArmModel();
-};
+  // タブを初期表示（ARMS）へ戻す
+  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
+  $("apply").style.display = "";
+  syncPhaseUI();
+}
+$("reset").onclick = doReset;
 renderCards();
+syncPhaseUI();
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
-  $("apply").style.display = t.dataset.t === "arms" ? "" : "none";
+  $("apply").style.display = "";
 });
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");
 $("eyeSw").onclick = e => { const c = e.target.dataset.c; if (c) { face.eyeCol = c; $("eyeCol").value = c; } };
 $("eyeCol").oninput = e => face.eyeCol = e.target.value;
 $("eyeOp").oninput = e => face.eyeOp = +e.target.value;
 $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face.eyeMode = m; document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b === e.target)); };
-$("ears").onchange = e => face.ears = e.target.checked;
+$("ears").onchange = e => { face.ears = e.target.checked; syncEarModel(); };
+$("earModel").onchange = e => { face.earModel = e.target.value; syncEarModel(); };
+$("earLEDCol").oninput = e => { face.earLEDCol = e.target.value; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
+$("earLEDOn").onchange = e => { face.earLEDOn = e.target.checked; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earSize").oninput = e => face.earSize = +e.target.value;
-$("earCol").oninput = e => earMat.color.set(e.target.value);
+$("earSpread").oninput = e => face.earSpread = +e.target.value;
+$("earLift").oninput = e => face.earLift = +e.target.value;
+$("earCol").oninput = e => {
+  face.earCol = e.target.value;
+  earMat.color.set(face.earCol);
+  earController.asset?.applyColor(face.earCol);
+};
+
+/* ---------------- 撮影（PNG保存） #11 ---------------- */
+import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
+const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
+const shotCtx = shotCanvas.getContext("2d");
+const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+// 体験中はパネルが隠れるため、案内はボタン自体にも短く表示する
+const CAPTURE_LABEL = $("capture").textContent;
+let captureMsgTimer = null;
+function captureMsg(t) {
+  say(t);
+  $("capture").textContent = t;
+  clearTimeout(captureMsgTimer);
+  captureMsgTimer = setTimeout(() => { $("capture").textContent = CAPTURE_LABEL; }, 2000);
+}
+$("capture").onclick = () => {
+  if (!capture.request()) { captureMsg(capture.busy ? "保存処理中です" : "カメラの準備ができていません"); return; }
+  $("capture").disabled = true;
+  captureMsg("撮影中...");
+};
+function endCapture() { capture.finish(); $("capture").disabled = false; }
+function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+// renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
+function runCapture() {
+  if (!capture.take()) return;
+  try {
+    composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
+  } catch (e) {
+    console.warn("撮影の合成に失敗:", e.message);
+    captureMsg("撮影に失敗しました");
+    endCapture();
+    return;
+  }
+  canvasToPngBlob(shotCanvas)
+    .then(blob => { downloadBlob(blob, makeFileName(), { doc: document, urlApi: URL }); captureMsg("ダウンロードを開始しました"); })
+    .catch(e => { console.warn("PNG保存に失敗:", e.message); captureMsg("保存に失敗しました"); })
+    .finally(endCapture);
+}
 
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
@@ -599,6 +784,7 @@ function loop() {
     updateHud(now);
   }
   renderer.render(scene, camera);
+  runCapture();
   requestAnimationFrame(loop);
 }
 loop();
