@@ -158,3 +158,13 @@ test('同梱の腕GLBの手は指の節に分かれ、基準寸法を持つ', as
     }
   }
 });
+
+test('腕モデルごとに Blender で編集できる原本（.blend）が同じフォルダーにある', async () => {
+  for (const [id, model] of Object.entries(ARM_MODELS)) {
+    const blend = new URL(model.url.replace(/\.glb$/, '.blend'), new URL('../project-chrome/', import.meta.url));
+    const head = (await readFile(blend)).subarray(0, 7);
+    // 圧縮して保存した .blend は zstd の目印、圧縮しない .blend は「BLENDER」で始まる
+    const zstd = head[0] === 0x28 && head[1] === 0xb5 && head[2] === 0x2f && head[3] === 0xfd;
+    assert.ok(zstd || head.toString('latin1') === 'BLENDER', `${id} の原本が .blend ではありません`);
+  }
+});
