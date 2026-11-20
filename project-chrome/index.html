@@ -96,8 +96,17 @@
     </section>
     <section id="sec-head" hidden>
       <h3>HEAD <em>// IMPLANTS</em></h3>
-      <label>Cat ears (猫耳) <input type="checkbox" id="ears"></label>
+      <label>Ears (耳を装着) <input type="checkbox" id="ears"></label>
+      <label>Ear model <select id="earModel"><option value="classic">CLASSIC</option><option value="glb">PROTOTYPE 04 (Blender)</option><option value="rabbit">RABBIT LED (Blender)</option></select></label>
+      <div id="earLEDControls" hidden>
+        <label>Inner LED <input type="checkbox" id="earLEDOn" checked></label>
+        <label>LED color <input type="color" id="earLEDCol" value="#ff9fc9"></label>
+      </div>
+      <p class="note" id="earStatus" role="status">CLASSIC：コード生成の耳</p>
       <label>Ear size <input type="range" id="earSize" min="0.6" max="1.6" step="0.05" value="1"></label>
+      <label>横位置（＋で外側）<input type="range" id="earSpread" min="-0.2" max="0.3" step="0.01" value="0"></label>
+      <label>高さ（＋で上）<input type="range" id="earLift" min="-0.2" max="0.3" step="0.01" value="0"></label>
+      <p class="note" id="earFitStatus" role="status">装着位置：髪の輪郭を基準に配置します。</p>
       <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
     </section>
     <div id="btns">

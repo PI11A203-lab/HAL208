@@ -8,3 +8,6 @@ test-results/
 .DS_Store
 Thumbs.db
 /running.png
+*.blend1
+*.blend2
+__pycache__/

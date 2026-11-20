@@ -61,6 +61,11 @@ project-chrome/
 
 ## 自作の猫耳・腕を追加する
 
+Blenderで耳を作り始める場合は[初期モデル生成と編集手順](../docs/blender-ears.md)を参照してください。
+HEADのEar modelでCLASSIC（従来形状）/PROTOTYPE 04（GLB）を選びます。
+GLBとBlender原本を同梱しています。PROTOTYPE 04を選ぶとGLBを読み込みます。
+実カメラでの追跡位置・PNGの見た目は展示PCで確認してください。
+
 ### 1. Blenderでモデルを作る
 
 - Blenderでパーツを作成します。
