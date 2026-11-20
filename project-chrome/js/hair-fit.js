@@ -1,5 +1,13 @@
 // 髪maskから頭頂付近の左右輪郭を求める。座標は反転前の動画pixel。
 // 顔座標へ戻して保持し、低頻度の髪推論の間も頭の動きに追従させる。
+export function fitEarAnchor(anchor, model, side, spread = 0, lift = 0) {
+  // ウサギ耳は側頭部の輪郭より内側へ。手動調整はモデル補正後に適用する。
+  return {
+    u: anchor.u * (model.anchorWidthScale ?? 1) + side * spread,
+    v: anchor.v + (model.anchorLift ?? 0) + lift,
+  };
+}
+
 export function findHairOffsets(mask, width, height, frame) {
   const { origin, right, up, faceWidth, imageWidth, imageHeight } = frame;
   const det = right.x * up.y - right.y * up.x;

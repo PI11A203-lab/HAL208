@@ -60,3 +60,7 @@ PROTOTYPE 04は最初のON時に読込。OFF/RESET中に完了した旧request�
 展示PCでのFPSと実カメラ確認結果は確認後に追記してください。
 
 参照：[Blender glTF公式マニュアル](https://docs.blender.org/manual/en/5.2/addons/scene_gltf2.html)。
+
+## LEDウサギ耳
+`ears-rabbit-led.blend` / `ears-rabbit-led.glb`は#25の内周LED付きウサギ耳。
+制作・材質・実際のくぼみ寸法・再生成・操作は[LEDウサギ耳](../../../docs/rabbit-led-ears.md)を参照。

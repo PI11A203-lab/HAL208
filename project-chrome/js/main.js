@@ -5,6 +5,7 @@ import { earShape } from "./face.js";
 import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
 import { createHairTracker } from './hair-tracking.js';
+import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -216,7 +217,7 @@ function drawSkel() {
 }
 
 /* ---------------- 顔モジュール（猫耳・目） ---------------- */
-const face = { ears: false, earSize: 1, earModel: 'classic', earCol: '#1b1f25', earSpread: 0, earLift: 0, eyeMode: "off", eyeCol: "#00e5ff", eyeOp: 0.85, lastSeen: -Infinity };
+const face = { ears: false, earSize: 1, earModel: 'classic', earLEDCol: '#ff9fc9', earLEDOn: true, earCol: '#1b1f25', earSpread: 0, earLift: 0, eyeMode: "off", eyeCol: "#00e5ff", eyeOp: 0.85, lastSeen: -Infinity };
 // ランドマーク番号：10=額、152=顎、234/454=頬、103/332=生え際、468/473=虹彩の中心、469-471/474-476=虹彩の左右端
 const IRIS = [468, 473], IRIS_EDGE = [[469, 471], [474, 476]];
 const LID = [[159, 145], [386, 374]], CORNER = [[33, 133], [362, 263]]; // まぶた（上下）と目尻・目頭
@@ -245,17 +246,18 @@ const ears = [0, 1].map(() => {
 });
 let earLoadError = '';
 const earController = createEarController({
-  load: () => loadEarAsset(EAR_MODEL.url),
+  load: id => loadEarAsset(EAR_MODELS[id].url, EAR_MODELS[id]),
   onChange: () => {
     const asset = earController.asset;
     if (asset) {
       asset.roots.forEach(root => { if (!root.parent) scene.add(root); });
       asset.applyColor(face.earCol);
+      asset.applyLED(face.earLEDCol, face.earLEDOn);
     }
-    document.getElementById('earStatus').textContent = face.earModel !== 'glb'
+    document.getElementById('earStatus').textContent = !EAR_MODELS[face.earModel]
       ? 'CLASSIC：コード生成の耳'
       : earController.loading ? '耳モデルを読込中…'
-      : asset ? EAR_MODEL.name : earLoadError || '耳をONにするとBlenderモデルを読み込みます。';
+      : asset ? EAR_MODELS[face.earModel].name : earLoadError || '耳をONにするとBlenderモデルを読み込みます。';
   },
   onError: () => { earLoadError = 'GLBが未配置または読込に失敗しました。CLASSICの耳を表示します。OFF→ONで再試行できます。'; },
 });
@@ -265,11 +267,12 @@ function syncEarModel() {
   earController.asset?.roots.forEach(root => { root.visible = false; });
   earLoadError = '';
   hairTracker.reset();
-  document.getElementById('earFitStatus').textContent = face.earModel !== 'glb'
-    ? '装着位置：輪郭追従はPROTOTYPE 04で利用できます。'
+  document.getElementById('earFitStatus').textContent = !EAR_MODELS[face.earModel]
+    ? '装着位置：輪郭追従はBlenderモデルで利用できます。'
     : face.ears ? '装着位置：髪の輪郭を確認中'
-    : '装着位置：猫耳をONにすると髪の輪郭へ配置します。';
-  earController.setEnabled(face.ears && face.earModel === 'glb');
+    : '装着位置：耳をONにすると髪の輪郭へ配置します。';
+  document.getElementById('earLEDControls').hidden = !EAR_MODELS[face.earModel]?.led;
+  earController.setEnabled(face.ears && Boolean(EAR_MODELS[face.earModel]), face.earModel);
 }
 
 /* --- 目：2Dキャンバスに描画（映像と同じ座標系。CSSで一緒に左右反転される） --- */
@@ -346,7 +349,7 @@ function updateFace(now) {
   const ok = now - face.lastSeen < HOLD_SEC;
   const P = id => fp[id].p;
   const earOn = face.ears && ok;
-  const glbEars = face.earModel === 'glb' && earController.enabled ? earController.asset : null;
+  const glbEars = EAR_MODELS[face.earModel] && earController.enabled ? earController.asset : null;
   ears.forEach(e => e.g.visible = earOn && !glbEars);
   earController.asset?.roots.forEach(root => { root.visible = Boolean(earOn && glbEars); });
   if (earOn) {
@@ -356,7 +359,7 @@ function updateFace(now) {
     const fw = new THREE.Vector3().crossVectors(right, up).normalize();   // カメラ方向
     right.crossVectors(up, fw).normalize();
     let hairOffsets = null;
-    if (face.earModel === 'glb') {
+    if (EAR_MODELS[face.earModel]) {
       if (now - face.lastSeen < 0.15) {
         hairTracker.sample(video, now * 1000, {
           origin: { x: P(10).x, y: H - P(10).y },
@@ -381,13 +384,14 @@ function updateFace(now) {
       if (glbEars) {
         const root = glbEars.roots[k];
         // 額の角(103/332)ではなく、頭頂付近の髪の左右輪郭に装着。
-        const anchor = hairOffsets?.[k] ?? { u: side * 0.52, v: 0.05 };
+        const anchor = fitEarAnchor(hairOffsets?.[k] ?? { u: side * 0.52, v: 0.05 },
+          EAR_MODELS[face.earModel], side, face.earSpread, face.earLift);
         root.position.copy(P(10))
-          .addScaledVector(right, faceW * (anchor.u + side * face.earSpread))
-          .addScaledVector(up, faceW * (anchor.v + face.earLift));
+          .addScaledVector(right, faceW * anchor.u)
+          .addScaledVector(up, faceW * anchor.v);
         // 外向きの輪郭はモデル自体に含む。頭の姿勢のみ適用し二重に傾けない。
         root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fw));
-        root.scale.setScalar(faceW * EAR_MODEL.faceWidthScale * face.earSize);
+        root.scale.setScalar(faceW * EAR_MODELS[face.earModel].faceWidthScale * face.earSize);
         return;
       }
       e.g.position.copy(P(id)).addScaledVector(up, faceW * 0.03);
@@ -412,7 +416,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, EAR_MODEL } from './config.js';
+import { DESIGNS, DEFAULTS, EAR_MODELS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // APPLYを押すまで腕は表示しない
@@ -501,6 +505,8 @@ function doReset() {
   selected = "mk1"; renderCards(); resetJoints();
   // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
   face.ears = false; face.earSize = 1; face.earModel = 'classic'; face.earCol = '#1b1f25'; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
+  face.earLEDCol = '#ff9fc9'; face.earLEDOn = true;
+  $("earLEDCol").value = face.earLEDCol; $("earLEDOn").checked = true;
   $("earModel").value = 'classic'; syncEarModel();
   face.earSpread = 0; face.earLift = 0;
   $("earSpread").value = 0; $("earLift").value = 0;
@@ -532,6 +538,8 @@ $("eyeOp").oninput = e => face.eyeOp = +e.target.value;
 $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face.eyeMode = m; document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b === e.target)); };
 $("ears").onchange = e => { face.ears = e.target.checked; syncEarModel(); };
 $("earModel").onchange = e => { face.earModel = e.target.value; syncEarModel(); };
+$("earLEDCol").oninput = e => { face.earLEDCol = e.target.value; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
+$("earLEDOn").onchange = e => { face.earLEDOn = e.target.checked; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earSize").oninput = e => face.earSize = +e.target.value;
 $("earSpread").oninput = e => face.earSpread = +e.target.value;
 $("earLift").oninput = e => face.earLift = +e.target.value;

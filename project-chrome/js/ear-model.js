@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { loadGLB } from './arms.js';
-import { findEarNodes } from './ear-state.js';
+import { findEarNodes, createEarMaterialControls } from './ear-state.js';
 
 // このGLBの所有資産のみを解放。左右の共有資産は一度だけ解放する。
 function disposeSource(source) {
@@ -17,7 +17,7 @@ function disposeSource(source) {
   geometries.forEach(geometry => geometry.dispose());
 }
 
-export function createEarAsset(source) {
+export function createEarAsset(source, { led = false } = {}) {
   let parts;
   try {
     parts = findEarNodes(source);
@@ -38,17 +38,11 @@ export function createEarAsset(source) {
       return pivot;
     });
     // 他の装備と共有しない。色を変えるのはshellのみで発光色は維持する。
-    const shells = new Set();
-    source.traverse(node => {
-      for (const material of [node.material].flat().filter(Boolean)) {
-        if (material.name === 'EarShell') shells.add(material);
-      }
-    });
-    if (!shells.size) throw new Error('EarShell materialがありません');
+    const controls = createEarMaterialControls(source, { led });
     let disposed = false;
     return {
       roots,
-      applyColor(color) { shells.forEach(material => material.color.set(color)); },
+      ...controls,
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -62,10 +56,10 @@ export function createEarAsset(source) {
   }
 }
 
-export function loadEarAsset(url) {
+export function loadEarAsset(url, options) {
   return new Promise((resolve, reject) => {
     loadGLB(url, source => {
-      try { resolve(createEarAsset(source)); } catch (error) { reject(error); }
+      try { resolve(createEarAsset(source, options)); } catch (error) { reject(error); }
     }, (message, error) => reject(new Error(message, { cause: error })));
   });
 }
