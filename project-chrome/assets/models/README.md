@@ -132,7 +132,7 @@ ARMS の `GADGET` で AUTO または種類を選ぶと、前腕に射出装置�
 ## 素材の出典・利用条件
 
 3つのモデルはいずれも外部の素材・テクスチャを使わず、Blender 5.2 の Python（bpy）スクリプトで形状を組み立てて生成したオリジナルモデルです。スクリプトの作成と生成にはAI（Claude）を使用し、内容は人が確認しています。
-Blender で開いて編集できます（`File > Import > glTF 2.0`）。編集後は `File > Export > glTF 2.0`（形式：glTF Binary `.glb`）で書き出し、ノード名・原点・+Y方向・マテリアル名を保ってください。
+Blender で編集する時は、下の「Blender 原本（腕）」の `.blend` を開いてください。
 外部の素材を使う場合は、出典URL・作者・ライセンスをこの表に追記してください。
 
 | ファイル | 作者・出典 | ライセンス・利用条件 |
@@ -141,6 +141,32 @@ Blender で開いて編集できます（`File > Import > glTF 2.0`）。編集�
 | `arm-neon.glb` | 同上 | 同上 |
 | `arm-titan.glb` | 同上 | 同上 |
 | `gadget-launcher.glb` | 同上 | 同上 |
+| `arm-mk1.blend` `arm-neon.blend` `arm-titan.blend` | 同上（同梱のGLBから作成した編集用の原本） | 同上 |
+
+## Blender 原本（腕）
+
+3つの腕モデルを Blender で編集できる原本です。耳モデルと同じく、原本とGLBを一緒にレビューし、原本を直したらGLBも書き出し直します。
+
+| ファイル | 内容 |
+|---|---|
+| `arm-mk1.blend` / `arm-neon.blend` / `arm-titan.blend` | 編集用の原本（圧縮して保存、約0.6〜1.6 MB）。同梱のGLBを Blender 5.2 で取り込んだもので、形・ノード名・指の節の位置・カスタムプロパティ・マテリアルはGLBと同じ |
+| `../../../scripts/blender/arms/blend_to_glb.py` | 原本からアプリ用のGLBを書き出すスクリプト |
+| `../../../scripts/blender/arms/create_arms.py` ほか `arm_*.py` | 形を数式で最初から組み立てる、最初の生成に使ったスクリプト |
+
+**修正の流れ**
+
+1. Blender で `arm-*.blend` を開いて形を直す。部品は横に並んでいますが、アプリは各ノードの原点からの形だけを使うので、並べ方はそのままで構いません。
+2. 次の決まりは変えない：ノード名（`UpperArm` / `Forearm` / `Hand` と指の15節）、各ノードの原点と向き（+Z＝次の関節、-Y＝前面。GLBでは +Y・+Z になる）、指の節と `Hand` のカスタムプロパティ（`baseLength` など）、マテリアル名（`shell` / `joint` / `emission`）。
+3. GLBを書き出す（リポジトリのルートで実行。同じ名前のファイルは `--force` を付けない限り上書きしない）：
+   ```
+   blender --background --python scripts/blender/arms/blend_to_glb.py -- project-chrome/assets/models/arm-neon.blend project-chrome/assets/models/arm-neon.glb --force
+   ```
+   Blender の画面からなら `File > Export > glTF 2.0`（glTF Binary、+Y Up、Apply Modifiers、Custom Properties をON、UV はOFF）でも同じです。
+4. `npm test` を実行し、アプリで腕と指の動きを確認する。
+
+- 原本から書き出したGLBは、同梱のGLBと形・構造が同じことを確認済みです（ノード名・位置・回転・カスタムプロパティ・部品の外形寸法・マテリアルを比較）。法線の分け方の違いで、ファイルは同梱のものより3〜10%大きくなります。
+- `create_arms.py` は形を最初から作り直す時だけ使います（`blender --background --python scripts/blender/arms/create_arms.py -- neon <出力フォルダー>`）。出力フォルダーに同じ名前のファイルがあると止まります。Blender の版によって細かな頂点の並びが変わるため、同梱のGLBとバイト単位では一致しません。
+- `.blend1` などの自動バックアップは git の対象外です（`.gitignore`）。
 
 ---
 
