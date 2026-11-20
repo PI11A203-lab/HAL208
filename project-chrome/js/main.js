@@ -1,12 +1,23 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { loadGLB } from "./arms.js";
+import { loadGLB, loadArmTemplate, createArmView } from "./arms.js";
+import { createRequestTracker, handTip, handBackNormal, assignHands } from "./arm-model.js";
+import { measureWidth, createSmoother } from "./body-fit.js";
+import { createGadgetView } from "./gadget.js";
+import { createFlame, configureFx } from "./flame.js";
+import { createBloom } from "./bloom.js";
+import { createVideoEnvironment, matchLighting } from "./env.js";
+import { ASSEMBLY_STAGES, ASSEMBLY_TIMING, assemblyDuration, lockedBetween } from "./assembly.js";
+import { createFlash, createSparks } from "./fx.js";
+import { playSfx, setLoop, setSfxMuted, setSfxVolume, sfxMuted, stopAllLoops, unlockAudio } from "./sfx.js";
+import { createChargeController, createGestureTrigger, createPunchDetector, shotPhase, shotDuration, isAimPose, elbowAngle,
+         classifyHand, createStableLabel, isFist, isOpenHand, GESTURE_TO_GADGET } from "./gadget-logic.js";
 import { earShape } from "./face.js";
 import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
-import { PoseLandmarker, FaceLandmarker, FilesetResolver }
+import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 const video = document.getElementById("video");
@@ -15,25 +26,27 @@ const skelCanvas = document.getElementById("skel");
 const skelCtx = skelCanvas.getContext("2d");
 const info = document.getElementById("info");
 
-/* ---------------- Ayarlar ---------------- */
+/* ---------------- 設定 ---------------- */
 // 初期設定は config.js から読み込みます。
 const settings = { ...DEFAULTS };
 const VIS_MIN = 0.5;      // この信頼度未満の点は更新しない
 const HOLD_SEC = 0.6;     // 検出が途切れた点の最終位置を保持する時間（秒）
 const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位）
 
-/* ---------------- One Euro filtresi ---------------- */
+/* ---------------- One Euro フィルター ---------------- */
 import { OneEuro } from './tracking.js';
 import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
-import { unlockAudio, playEquip } from './sound.js';
+// 装着音の入口（#15）。腕のギミックの効果音（sfx.js）と名前が重ならないよう別名で読む
+import { unlockAudio as unlockEquipSound, playEquip } from './sound.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
-let landmarker, faceLm, vision;
+let landmarker, faceLm, vision, visionFiles;
 try {
   info.textContent = "モデルを読み込み中（インターネット接続が必要）...";
   vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  visionFiles = vision;
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
@@ -41,6 +54,7 @@ try {
     },
     runningMode: "VIDEO",
     numPoses: 1,
+    outputSegmentationMasks: true, // 人物の切り抜き：腕の実際の太さを測るために使う
   });
   // 顔モデル：猫耳と目のエフェクト用
   faceLm = await FaceLandmarker.createFromOptions(vision, {
@@ -74,7 +88,7 @@ document.getElementById("camdot").className = "on";
 document.getElementById("cam").textContent = "ONLINE"; document.getElementById("cam").className = "ok";
 document.getElementById("camres").textContent = `WEBCAM (${W}×${H})`;
 
-/* ---------------- three.js sahnesi ---------------- */
+/* ---------------- three.jsシーン ---------------- */
 // 正射影カメラ：1単位＝動画の1ピクセル、y軸は上向き（そのため y = H - y_ピクセル）
 const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, alpha: true, antialias: true });
 renderer.setPixelRatio(1);
@@ -88,11 +102,14 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const key = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(-1, 2, 3);
 scene.add(key);
+// クロームに実際の部屋を映し、部屋の明るさに照明を合わせる（TRACKING SETTINGS の Room reflections）
+const roomEnv = createVideoEnvironment(renderer, scene, video);
 
 const camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
 camera.position.z = 2000;
+const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
-/* ---------------- Robot kol modeli ---------------- */
+/* ---------------- ロボットアームモデル ---------------- */
 const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
 const jointMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
 const neonMat  = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
@@ -123,7 +140,122 @@ function makeArm(name, ids) {
 const ARMS = [makeArm("Left arm", [11, 13, 15]), makeArm("Right arm", [12, 14, 16])];
 // カスタムGLBモデルの読み込みには arms.js の loadGLB() を使用できます。
 
-/* ---------------- Eklem durumu ---------------- */
+/* ---------------- GLB腕モデル（Issue #7） ---------------- */
+// status：none（簡易形状）/ loading / ready / failed。views は ARMS と同じ順の左右の表示。
+// requests で最新の依頼だけを有効にし、連続切替やRESET後に古いモデルが復活しないようにする。
+const armModel = { id: null, status: "none", views: null, requests: createRequestTracker(), assembly: null };
+
+function clearArmModel() {
+  armModel.requests.cancel();
+  armModel.views?.forEach(v => v.dispose());
+  Object.assign(armModel, { id: null, status: "none", views: null, assembly: null });
+  $("assemblybox").style.display = "none";
+}
+
+/* ---------------- 装着の演出（APPLY 後に部品が飛んできてはまる） ---------------- */
+// 人が映ってから始め、部品がはまるたびに関節で火花と閃光を出し、画面にシステム表示を1行ずつ出す。
+const assemblyFx = { sparks: createSparks(160), flashes: Array.from({ length: 4 }, () => createFlash()), pops: [] };
+scene.add(assemblyFx.sparks.object, ...assemblyFx.flashes);
+
+function startAssembly() {
+  armModel.assembly = { start: null, prev: -0.001 };
+  const box = $("assemblybox");
+  box.innerHTML = `<b>ASSEMBLING // ${design.name}</b>`;
+  box.style.display = "none";
+}
+
+function assemblyJoint(arm, joint) {
+  const [sh, el, wr] = arm.ids.map(id => conv(joints[id].p));
+  if (joint === "shoulder") return sh;
+  if (joint === "elbow") return el;
+  if (joint === "wrist") return wr;
+  return wr.clone().addScaledVector(wr.clone().sub(el), 0.35);   // 指の付け根あたり
+}
+
+function updateAssembly(now) {
+  const a = armModel.assembly, box = $("assemblybox");
+  // 閃光（はまった瞬間に関節で光る）
+  assemblyFx.pops = assemblyFx.pops.filter(p => {
+    const k = (now - p.t0) / 0.18;
+    p.mesh.visible = k < 1;
+    if (!p.mesh.visible) return false;
+    p.mesh.position.copy(p.at); p.mesh.position.z += 20;
+    p.mesh.scale.setScalar(p.size * (0.6 + 0.6 * k));
+    p.mesh.material.uniforms.alpha.value = 1 - k;
+    p.mesh.material.uniforms.time.value = now;
+    return true;
+  });
+  assemblyFx.sparks.update(frameDt, bodyScale * 4);
+  if (!a || armModel.status !== "ready") return;
+  const visible = ARMS.filter(arm => arm.state !== "lost" && armsShown());
+  if (a.start === null) {
+    if (!visible.length) { armModel.views.forEach(v => v.setAssembly(0)); return; }   // 人が映るまで待つ
+    a.start = now;
+    box.style.display = "block";
+  }
+  const t = now - a.start;
+  for (let i = 0; i < lockedBetween(a.prev, t, { gap: ASSEMBLY_TIMING.gap, dur: 0 }).length; i++) playSfx("assemble-whir", { volume: 0.8 });
+  for (const i of lockedBetween(a.prev, t)) {
+    playSfx("assemble-lock", { volume: 0.9, rate: 1 + i * 0.05 });
+    const stage = ASSEMBLY_STAGES[i];
+    visible.forEach((arm, k) => {
+      const at = assemblyJoint(arm, stage.joint);
+      assemblyFx.sparks.burst(at.toArray(), [0, 1, 0], new THREE.Color(design.neon), 22, bodyScale * 1.6, 1.8);
+      const mesh = assemblyFx.flashes[(i * 2 + k) % assemblyFx.flashes.length];
+      mesh.material.uniforms.color.value.setHex(design.neon);
+      mesh.material.uniforms.seed.value = Math.random() * 6.28;
+      assemblyFx.pops.push({ mesh, at, t0: now, size: bodyScale * 0.7 });
+    });
+    box.insertAdjacentHTML("beforeend", `<div>${stage.label}<i></i><em>OK</em></div>`);
+    shakeAmp = Math.min(1, shakeAmp + 0.25);
+    if (i === ASSEMBLY_STAGES.length - 1) {
+      box.insertAdjacentHTML("beforeend", `<div class="done">SYNC COMPLETE<em>ONLINE ▶</em></div>`);
+      playSfx("assemble-done", { volume: 0.7, jitter: 0 });
+    }
+  }
+  a.prev = t;
+  const total = assemblyDuration();
+  armModel.views.forEach(v => v.setAssembly(t < total ? t : null));
+  if (t >= total) { armModel.assembly = null; box.style.display = "none"; }
+}
+
+async function useArmModel(id) {
+  if (armModel.id === id && armModel.status === "ready") {   // 同じモデルは読み直さず外観だけ更新
+    armModel.views.forEach(v => v.applyAppearance(design));
+    startAssembly();
+    say(design.name + " を適用しました。");
+    return;
+  }
+  const model = ARM_MODELS[id];
+  const request = armModel.requests.next();
+  armModel.id = id; armModel.status = "loading";
+  info.textContent = "腕モデルを読み込み中...";           // 読込中は簡易形状で表示を続ける
+  const t0 = performance.now();
+  try {
+    if (!model) throw new Error(`ARM_MODELS に ${id} がありません`);
+    const template = await loadArmTemplate(model.url);
+    if (!armModel.requests.isCurrent(request)) return;       // 途中で別の装備やRESETが選ばれた
+    // MediaPipe の 11-13-15 は本人の左腕。右腕として作ったモデルは左腕で左右反転する
+    const views = ARMS.map(arm => createArmView(template, model, { mirror: Boolean(model.mirrorLeft) && arm.ids[0] === 11 }));
+    armModel.views?.forEach(v => v.dispose());
+    views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
+    armModel.views = views; armModel.model = model; armModel.status = "ready";
+    // 部品は腕の外側・上から飛んでくる（MediaPipe の 12＝本人の右肩は映像の左側）
+    views.forEach((v, i) => v.setAssembly(0, [(ARMS[i].ids[0] === 12 ? -1 : 1) * W * 0.45, H * 0.3, 200]));
+    startAssembly();
+    if (views.some(v => v.hasFingers)) ensureHandLandmarker();   // 指の追跡は必要になってから読み込む
+    console.info(`腕モデル ${id} を ${Math.round(performance.now() - t0)} ms で読み込みました。`);
+    say(design.name + " を適用しました。");
+  } catch (e) {
+    if (!armModel.requests.isCurrent(request)) return;
+    armModel.views?.forEach(v => v.dispose());
+    Object.assign(armModel, { views: null, status: "failed" });
+    console.warn("腕モデルを読み込めませんでした。簡易モデルで表示します。", e);
+    say("腕モデルを読み込めませんでした。簡易モデルで表示します。");
+  }
+}
+
+/* ---------------- 関節疾患 ---------------- */
 const JOINTS = [11, 12, 13, 14, 15, 16];
 const joints = {};
 function resetJoints() {
@@ -134,6 +266,93 @@ function resetJoints() {
 }
 resetJoints();
 let bodyScale = 0.2 * W; // 肩幅（ピクセル）：腕の太さの基準
+
+/* ---------------- 体格に合わせた腕の太さ ---------------- */
+// 人物の切り抜きマスクから上腕・前腕の実際の幅を測り、なめらかにして使う（測れない間は肩幅から推定）
+for (const arm of ARMS) arm.fit = { upper: createSmoother(BODY_FIT.smoothing), fore: createSmoother(BODY_FIT.smoothing) };
+let fitFrame = 0;
+
+function processBodyFit(result) {
+  const masks = result.segmentationMasks ?? [];
+  try {
+    if (!masks.length || fitFrame++ % BODY_FIT.everyFrames !== 0) return;
+    const mask = masks[0], data = mask.getAsFloat32Array();
+    const opts = { maxHalf: bodyScale * 0.35 };
+    const ok = (w) => (w !== null && w > bodyScale * 0.05 && w < bodyScale * 0.6 ? w : null);
+    const now = performance.now() / 1000;
+    for (const arm of ARMS) {
+      const [s, e, w] = arm.ids.map(id => joints[id]);
+      if ([s, e, w].some(j => now - j.lastSeen > 0.2)) continue;
+      // マスクの解像度が映像と違う場合に合わせる
+      const sx = mask.width / W, sy = mask.height / H;
+      const px = (j) => ({ x: j.p.x * sx, y: j.p.y * sy });
+      arm.fit.upper.update(ok(measureWidth(data, mask.width, mask.height, px(s), px(e), opts) / sx));
+      arm.fit.fore.update(ok(measureWidth(data, mask.width, mask.height, px(e), px(w), opts) / sx));
+    }
+  } finally {
+    masks.forEach(m => m.close()); // 毎フレーム解放する（GPUメモリの増加を防ぐ）
+  }
+}
+
+/* ---------------- 指の追跡 ---------------- */
+// 指に分かれたGLB腕を表示している間だけ、手の21点を検出して指の節を動かす
+let handLm = null, handLmLoading = false;
+for (const arm of ARMS) {
+  arm.hand = { pts: Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0 })), lastSeen: -Infinity,
+               f: Array.from({ length: 21 }, () => [new OneEuro(), new OneEuro(), new OneEuro()]) };
+}
+
+async function ensureHandLandmarker() {
+  if (handLm || handLmLoading) return;
+  handLmLoading = true;
+  try {
+    handLm = await HandLandmarker.createFromOptions(visionFiles, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 2,
+    });
+  } catch (e) {
+    console.warn("手の追跡モデルを読み込めませんでした。指は固定の形で表示します。", e);
+  } finally {
+    handLmLoading = false;
+  }
+}
+
+function processHands(t0, now) {
+  if (!handLm || !armModel.views?.some(v => v.hasFingers) || !armsShown()) return;
+  const res = handLm.detectForVideo(video, t0);
+  const hands = res.landmarks ?? [];
+  if (!hands.length) return;
+  const pick = assignHands(hands.map(l => ({ x: l[0].x * W, y: l[0].y * H })),
+                           ARMS.map(a => joints[a.ids[2]].p), bodyScale * 0.6);
+  const minCutoff = 3.0 * Math.pow(0.1, settings.smooth);
+  ARMS.forEach((arm, i) => {
+    if (pick[i] < 0) return;
+    const h = arm.hand, reset = now - h.lastSeen > 0.3;
+    hands[pick[i]].forEach((q, k) => {
+      const f = h.f[k];
+      if (reset) f.forEach(x => x.reset());
+      h.pts[k].x = f[0].filter(q.x * W, now, minCutoff, BETA);
+      h.pts[k].y = f[1].filter(q.y * H, now, minCutoff, BETA);
+      h.pts[k].z = f[2].filter(q.z * W, now, minCutoff, BETA);
+    });
+    h.lastSeen = now;
+  });
+}
+
+// 手の21点をシーン座標にし、手首を腕の手首に合わせる
+function handPose(arm, wrist, now) {
+  const h = arm.hand;
+  if (now - h.lastSeen > 0.25) return null;
+  const pts = h.pts.map(p => [p.x, H - p.y, -p.z * settings.depth]);
+  const d = [0, 1, 2].map(i => wrist[i] - pts[0][i]);
+  pts.forEach(p => { p[0] += d[0]; p[1] += d[1]; p[2] += d[2]; });
+  const palm = Math.hypot(...[0, 1, 2].map(i => pts[5][i] - pts[17][i]));
+  return { points: pts, back: handBackNormal(pts, arm.ids[0] === 12), radius: palm * 0.62 * BODY_FIT.cover };
+}
 
 function processFrame(result, now) {
   const lm = result.landmarks[0];
@@ -167,19 +386,249 @@ function setCyl(mesh, a, b, r) {
   mesh.scale.set(r, len, r);
 }
 
+/* ---------------- 腕のギミック（PLASMA / NET / HOOK / FIST）と指先の火 ---------------- */
+// AUTO：手の形・動きでギミックを選んで発射する（対応は gadget-logic.js の GESTURE_TO_GADGET の説明を参照）。
+// 種類を1つ選んだ時：腕をまっすぐ伸ばして肩の高さより上に向けると溜め始め、構えを解くか握った拳を開くと発射する。
+// 溜めるほど弾が大きく遠くへ飛ぶ。FIREボタン・Gキーでは最大の溜めですぐ発射する（AUTO の時は PLASMA）。
+const gadget = { kind: "off", views: null, requests: createRequestTracker(),
+                 ctrls: ARMS.map(() => createChargeController({ fullCharge: GADGET.fullCharge })),
+                 shots: ARMS.map(() => null), aimDir: ARMS.map(() => [0, 1, 0]), curDir: ARMS.map(() => [0, 1, 0]),
+                 foreLen: ARMS.map(() => 100),
+                 triggers: ARMS.map(() => createGestureTrigger({ hold: 0.2 })), punches: ARMS.map(() => createPunchDetector()),
+                 labels: ARMS.map(() => null) };
+// 待機中に表示する装置の形（AUTO の時は射出装置）
+const idleKind = () => (gadget.kind === "auto" ? "plasma" : gadget.kind);
+const flames = ARMS.map(() => { const f = createFlame(); scene.add(f.object); return f; });
+const pointing = ARMS.map(() => ({ since: null }));
+let frameDt = 1 / 30;
+const ease01 = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+
+// 1本の腕のギミックの状態（溜め・発射中の弾・ジェスチャー判定・指先の火）を初期状態に戻す。
+// 追跡を失った時と RESET の時に呼び、溜めた時間や弾が後から復活しないようにする
+function resetArmGadget(i) {
+  gadget.ctrls[i].reset();
+  gadget.shots[i] = null;
+  gadget.triggers[i].reset();
+  gadget.punches[i].reset();
+  gadget.labels[i] = null;
+  handLabels[i].reset();
+  currentLabel[i] = null;
+  pointing[i].since = null;
+  pointing[i].lit = false;
+}
+
+// すべての腕のギミックの状態を初期化し、続いている音（溜め・火・噴射）も止める
+function resetGadgetState() {
+  ARMS.forEach((_, i) => resetArmGadget(i));
+  wasFull = false;
+  stopAllLoops();
+}
+
+function clearGadget() {
+  gadget.requests.cancel();
+  gadget.views?.forEach(v => v.dispose());
+  gadget.views = null;
+  resetGadgetState();
+}
+
+async function setGadgetKind(kind) {
+  gadget.kind = kind;
+  document.querySelectorAll("#gadgetMode button").forEach(b => b.classList.toggle("sel", b.dataset.g === kind));
+  if (kind === "off") { clearGadget(); return; }
+  if (gadget.views) return;                                    // 種類の切替は表示側で行う
+  const request = gadget.requests.next();
+  try {
+    const template = await loadArmTemplate(GADGET.url);
+    if (!gadget.requests.isCurrent(request)) return;
+    gadget.views = ARMS.map(() => createGadgetView(template, { onEvent: gadgetSound }));
+    gadget.views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
+  } catch (e) {
+    if (!gadget.requests.isCurrent(request)) return;
+    console.warn("ギミックのモデルを読み込めませんでした。", e);
+    say("ギミックのモデルを読み込めませんでした。");
+    gadget.kind = "off";
+    document.querySelectorAll("#gadgetMode button").forEach(b => b.classList.toggle("sel", b.dataset.g === "off"));
+  }
+}
+
+// ギミックの効果音（発射・命中・巻き取り）
+const SHOT_SOUNDS = {
+  fire: { plasma: "plasma-fire", net: "net-fire", hook: "hook-fire", fist: "fist-launch" },
+  hit: { plasma: "plasma-hit", net: "net-open", hook: "hook-hit", fist: "fist-hit" },
+  reel: { hook: "hook-reel" },
+};
+function gadgetSound(type, kind, power) {
+  const name = SHOT_SOUNDS[type]?.[kind];
+  // 溜めが強いほど低く大きな音にする
+  if (name) playSfx(name, { volume: 0.6 + 0.4 * power, rate: kind === "plasma" ? 1.2 - 0.3 * power : 1 });
+}
+
+function startShot(i, power, opened, now, dir, kind = idleKind()) {
+  const view = gadget.views?.[i];
+  if (!view || gadget.kind === "off" || gadget.shots[i]) return;
+  const arm = ARMS[i];
+  const origin = kind === "fist" ? conv(joints[arm.ids[2]].p).toArray() : view.muzzle;
+  const range = gadget.foreLen[i] * GADGET.range * (0.7 + 0.6 * power);
+  gadget.shots[i] = { start: now, kind, power, opened, origin, dir, range };
+  gadget.ctrls[i].busy(now + shotDuration(kind, power, opened));
+}
+
+function fireGadget(now) {
+  if (gadget.kind === "off") { say("GADGET で種類を選んでください。"); return; }
+  ARMS.forEach((a, i) => { if (a.state !== "lost") startShot(i, 1, false, now, gadget.curDir[i]); });
+}
+
+// AUTO：手の形とパンチの動きから発射する。PLASMA の溜めに使う「構え」を返す
+// 手の形（数フレーム続いた形だけを採用し、形を変える途中の一瞬の形では発射しない）
+const handLabels = ARMS.map(() => createStableLabel({ window: 6, need: 4 }));
+const currentLabel = ARMS.map(() => null);
+function updateHandLabel(i, pts) {
+  currentLabel[i] = handLabels[i].update(pts ? classifyHand(pts) : null);
+  return currentLabel[i];
+}
+
+function autoGestures(i, pts, angle, aiming, now) {
+  const label = currentLabel[i];
+  gadget.labels[i] = label;
+  const dir = gadget.curDir[i];
+  // ロケットパンチ：拳を握って肘を勢いよく伸ばす（手が見えない時は腕の動きだけで判定）
+  if (gadget.punches[i].update(now, angle, !pts || label === "fist")) startShot(i, 1, false, now, dir, "fist");
+  // NET・HOOK：手の形を少し保つと発射
+  const g = gadget.triggers[i].update(now, label);
+  if (g && GESTURE_TO_GADGET[g]) startShot(i, 1, false, now, dir, GESTURE_TO_GADGET[g]);
+  // PLASMA：腕を上げて手を開くと溜め始め、拳を握る（または腕を下ろす）と発射。
+  // 溜めている間は、手の形が一瞬あいまいになっても（null）発射しない
+  if (!aiming) return false;
+  if (!pts) return true;
+  if (gadget.ctrls[i].mode === "charging") return label === "open" || label === null;
+  return label === "open";
+}
+
+// s：{ el, wr（シーン座標の THREE.Vector3）, thickness, hand（handPose の結果か null） }。戻り値：手をずらす量
+function updateGadget(arm, s, now) {
+  const i = ARMS.indexOf(arm), view = gadget.views?.[i];
+  // 追跡を失った時は、この腕の溜め・弾・判定を取り消す（画面外にいた時間が溜めに加わらないように）
+  if (!s) resetArmGadget(i);
+  if (!view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
+  view.setVisible(true);
+  const ctrl = gadget.ctrls[i];
+  const d = new THREE.Vector3().subVectors(s.wr, s.el);
+  gadget.foreLen[i] = Math.max(d.length(), 1);
+  gadget.curDir[i] = d.normalize().toArray();
+  const [ps, pe, pw] = arm.ids.map(id => joints[id].p);
+  const aiming = isAimPose(ps, pe, pw);
+  if (aiming) gadget.aimDir[i] = gadget.curDir[i];
+  const pts = s.hand?.points;
+  let ev;
+  if (gadget.kind === "auto") {
+    const charging = autoGestures(i, pts, elbowAngle(ps, pe, pw), aiming, now);
+    ev = ctrl.update(now, { aiming: charging });
+  } else {
+    ev = ctrl.update(now, { aiming, fist: pts ? isFist(pts) : false, open: pts ? isOpenHand(pts) : false, tracked: Boolean(pts) });
+  }
+  if (ev) startShot(i, ev.power, true, now, gadget.aimDir[i]);
+  let shot = gadget.shots[i], phase = null;
+  if (shot) {
+    phase = shotPhase(now - shot.start, shot.kind, shot.power, { opened: shot.opened });
+    if (!phase.active) { gadget.shots[i] = shot = null; phase = null; }
+  }
+  const offset = view.update({ elbow: s.el.toArray(), wrist: s.wr.toArray(), thickness: s.thickness, config: GADGET,
+                       kind: shot?.kind ?? idleKind(), open: ease01(ctrl.held / 0.3), charge: ctrl.charge,
+                       shot: shot ? { ...shot, phase } : null }, frameDt);
+  shakeAmp = Math.min(1, shakeAmp + view.takeShake());
+  return offset;
+}
+
+// 画面の揺れ：発射・命中の強さに合わせて少し揺らし、すぐに収まる
+let shakeAmp = 0;
+function applyShake(dt) {
+  const k = shakeAmp * bodyScale * 0.025;
+  camera.position.x = (Math.random() - 0.5) * k;
+  camera.position.y = (Math.random() - 0.5) * k;
+  shakeAmp *= Math.exp(-dt * 9);
+  if (shakeAmp < 0.01) shakeAmp = 0;
+}
+
+// 人差し指だけを立てると、指先に火がつく（手を追跡している時のみ）
+function updateFlame(arm, hand, now) {
+  const i = ARMS.indexOf(arm), st = pointing[i];
+  const on = Boolean(hand) && currentLabel[i] === "point";
+  if (on) { if (st.since === null) st.since = now; } else st.since = null;
+  const lit = on && now - st.since >= FLAME.holdSec;
+  if (lit && !st.lit) playSfx("flame-ignite", { volume: 0.8 });   // 火が点いた瞬間
+  st.lit = lit;
+  let at = null;
+  if (lit) {
+    const [a, b] = [hand.points[7], hand.points[8]];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1;
+    at = [0, 1, 2].map(k => b[k] + (b[k] - a[k]) / len * hand.radius * 0.15);
+  }
+  flames[i].update(frameDt, at, Math.max(hand ? hand.radius * FLAME.size : 10, 14), [0, 1, 0]); // 火は上へ立ちのぼる
+}
+
+// 続く音：溜め・指先の火・ロケットの噴射
+let wasFull = false;
+function updateLoops(now) {
+  const c = Math.max(0, ...gadget.ctrls.map(x => x.charge));
+  const charging = gadget.kind !== "off" && gadget.ctrls.some(x => x.mode === "charging");
+  setLoop("charge-loop", charging ? 0.25 + 0.6 * c : 0, 0.7 + 0.9 * c);
+  if (c >= 1 && !wasFull) playSfx("charge-full", { volume: 0.7 });
+  wasFull = c >= 1;
+  const lit = flames.some((f, i) => pointing[i].lit);
+  setLoop("flame-loop", lit ? 0.8 : 0);
+  const thrusting = gadget.shots.some(s => s?.kind === "fist" && now - s.start < 0.75);
+  setLoop("thrust-loop", thrusting ? 0.7 : 0, 1.1);
+}
+
+// 溜めの表示（どちらかの腕が溜めている間だけ）
+function updateChargeHud() {
+  const c = Math.max(0, ...gadget.ctrls.map(x => x.charge));
+  const charging = gadget.kind !== "off" && gadget.ctrls.some(x => x.mode === "charging");
+  $("chargebox").style.display = charging ? "block" : "none";
+  $("chargebar").style.width = Math.round(c * 100) + "%";
+  $("chargeval").textContent = c >= 1 ? "MAX" : Math.round(c * 100) + "%";
+  // 操作ガイド：AUTO の時だけ表示し、いま認識している手の形を光らせる
+  const guide = $("gesturebox");
+  guide.style.display = gadget.kind === "auto" && armsShown() ? "block" : "none";
+  const seen = new Set(gadget.labels.filter(Boolean));
+  if (gadget.ctrls.some(x => x.mode === "charging")) seen.add("open");
+  guide.querySelectorAll("[data-gs]").forEach(el => el.classList.toggle("on", seen.has(el.dataset.gs)));
+}
+
 function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
   const age = Math.max(...js.map(j => now - j.lastSeen));
   arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
-  arm.g.visible = exp.phase === PHASES.ACTION && age < HOLD_SEC;
-  if (!arm.g.visible) return;
+  const show = armsShown() && age < HOLD_SEC;
+  const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
+  arm.g.visible = show && !view;
+  view?.setVisible(show);
+  if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   const m = arm.m;
-  const base = bodyScale * 0.14 * settings.thick * design.thick;
+  // 腕の太さ：測れていれば実際の幅（少し大きめ）、測れていなければ肩幅から推定
+  const k = settings.thick * design.thick;
+  const guess = bodyScale * 0.14 * k;
+  const upperR = arm.fit.upper.value !== null ? arm.fit.upper.value / 2 * BODY_FIT.cover * k : guess;
+  const foreR = arm.fit.fore.value !== null ? arm.fit.fore.value / 2 * BODY_FIT.cover * k : guess * 0.85;
+  const base = upperR;
+
+  const hand = view?.hasFingers ? handPose(arm, wr.toArray(), now) : null;
+  updateHandLabel(ARMS.indexOf(arm), hand?.points ?? null);
+  const handOffset = updateGadget(arm, { el, wr, thickness: foreR, hand }, now);
+  updateFlame(arm, hand, now);
+
+  if (view) {
+    const [a, b, c] = [sh, el, wr].map(v => v.toArray());
+    const rs = armModel.model.parts.fore.radiusScale ?? 1;
+    view.applyPose({ shoulder: a, elbow: b, wrist: c, handTip: handTip(b, c, armModel.model.handRatio) },
+                   { upper: upperR, fore: foreR / rs, hand: foreR / rs }, hand, handOffset);
+    return;
+  }
 
   setCyl(m.upper, sh, el, base);
-  setCyl(m.fore, el, wr, base * 0.85);
+  setCyl(m.fore, el, wr, foreR);
   m.shoulder.position.copy(sh); m.shoulder.scale.setScalar(base * 1.25);
   m.elbow.position.copy(el);    m.elbow.scale.setScalar(base * 1.1);
 
@@ -192,6 +641,7 @@ function updateArm(arm, now) {
   m.hand.position.copy(wr).addScaledVector(fd, handLen / 2);
   m.hand.quaternion.setFromUnitVectors(Y, fd);
   m.hand.scale.set(base * 1.5, handLen, base * 0.7);
+  if (handOffset) m.hand.position.add(new THREE.Vector3().fromArray(handOffset));   // ロケットフィスト
 
   // ネオンリング：前腕の軸に垂直
   m.ring1.position.copy(el).addScaledVector(fd, fl * 0.12);
@@ -416,10 +866,12 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, EAR_MODELS } from './config.js';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // APPLYを押すまで腕は表示しない
+// 腕（簡易形状・GLB・ギミック）を表示するのは体験フェーズ（ACTION）の時だけ（#15）
+function armsShown() { return exp.phase === PHASES.ACTION; }
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -440,6 +892,9 @@ function renderCards() {
   $("dname").textContent = d.name; $("ddesc").textContent = d.long;
   ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
 }
+function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
+$("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
+document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 const EQUIP_MS = 1000;
 let equipTimer = null;
 function cancelEquip() {
@@ -455,17 +910,17 @@ function syncPhaseUI() {
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
 }
-function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
-$("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
-document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 $("apply").onclick = () => {
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
-  unlockAudio();
+  unlockEquipSound();
   playEquip();
   applyDesign(DESIGNS[selected]);
+  gadget.views?.forEach(v => v.applyAppearance(design));
+  if (design.model) useArmModel(design.model);                // GLBモデルがある装備（ACTION になると装着演出が始まる）
+  else clearArmModel();
   const id = exp.requestId;
   cancelEquip();
   equipTimer = setTimeout(() => {
@@ -480,6 +935,7 @@ $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
+  resetGadgetState(); // 溜め・弾・判定・音を持ち越さない
   syncPhaseUI();
   say("装備選択に戻りました。");
 };
@@ -496,6 +952,25 @@ $("showSkel").onchange = e => settings.showSkel = e.target.checked;
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
+// 効果音：ブラウザの制限で、最初のクリック・キー操作の後から鳴る
+document.addEventListener("pointerdown", () => unlockAudio(), { capture: true });
+document.addEventListener("keydown", e => {
+  unlockAudio();
+  if (e.key.toLowerCase() === "m" && !(e.target instanceof HTMLInputElement)) {   // M キーで消音の切り替え
+    setSfxMuted(!sfxMuted()); $("sound").checked = !sfxMuted();
+    if (sfxMuted()) stopAllLoops();
+  }
+}, { capture: true });
+$("sound").onchange = e => { setSfxMuted(!e.target.checked); if (!e.target.checked) stopAllLoops(); };
+$("volume").oninput = e => setSfxVolume(+e.target.value);
+$("fxq").onchange = e => {
+  configureFx({ quality: e.target.value });
+  roomEnv.every = e.target.value === "high" ? 8 : 20;          // LOW では反射の作り直しを減らす
+};
+$("roomEnv").onchange = e => {
+  roomEnv.enabled = e.target.checked;
+  if (!e.target.checked) { key.color.set(0xffffff); key.intensity = 1.2; }
+};
 function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
@@ -503,6 +978,7 @@ function doReset() {
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
+  ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
   // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
   face.ears = false; face.earSize = 1; face.earModel = 'classic'; face.earCol = '#1b1f25'; face.eyeMode = "off"; face.eyeCol = "#00e5ff"; face.eyeOp = 0.85;
   face.earLEDCol = '#ff9fc9'; face.earLEDOn = true;
@@ -517,6 +993,9 @@ function doReset() {
   document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
   applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  clearArmModel();
+  resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
+  setGadgetKind("auto");
   // タブを初期表示（ARMS）へ戻す
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
@@ -524,8 +1003,14 @@ function doReset() {
   syncPhaseUI();
 }
 $("reset").onclick = doReset;
+$("gadgetMode").onclick = e => { const g = e.target.dataset.g; if (g) setGadgetKind(g); };
+$("gadgetFire").onclick = () => fireGadget(performance.now() / 1000);
+document.addEventListener("keydown", e => {
+  if (e.key.toLowerCase() === "g" && !(e.target instanceof HTMLInputElement)) fireGadget(performance.now() / 1000);
+});
 renderCards();
 syncPhaseUI();
+setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
   document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
@@ -605,7 +1090,7 @@ function updateHud(now) {
 }
 
 /* ---------------- メインループ ---------------- */
-let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0;
+let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0, lastFrame = null;
 
 function loop() {
   if (video.currentTime !== lastVideoTime) {
@@ -616,8 +1101,15 @@ function loop() {
     const now = t0 / 1000;
 
     processFrame(result, now);
+    processBodyFit(result);
+    processHands(t0, now);
     if (face.ears || face.eyeMode !== "off") processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
+    frameDt = lastFrame === null ? 1 / 30 : Math.min(0.1, Math.max(0.001, now - lastFrame));
+    lastFrame = now;
     ARMS.forEach(a => updateArm(a, now));
+    updateAssembly(now);
+    updateChargeHud();
+    updateLoops(now);
     updateFace(now);
     drawSkel();
 
@@ -625,8 +1117,10 @@ function loop() {
     if (t0 - fpsStart >= 1000) { fps = frames * 1000 / (t0 - fpsStart); frames = 0; fpsStart = t0; }
     updateHud(now);
   }
-  renderer.render(scene, camera);
-  runCapture();
+  applyShake(frameDt);
+  if (roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
+  bloom.render(scene, camera);
+  runCapture();                                               // 描画（ブルーム込み）の直後に撮影する（#11）
   requestAnimationFrame(loop);
 }
 loop();
