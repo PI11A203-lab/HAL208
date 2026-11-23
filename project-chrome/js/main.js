@@ -6,7 +6,10 @@ import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
-import { PoseLandmarker, FaceLandmarker, FilesetResolver }
+import { HAND_CONFIG, EFFECTS, createGestureTracker, selectHand } from './gestures.js';
+import { createHandInput } from './hand-input.js';
+import { createArmGlow, createShield } from './effects.js';
+import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 const video = document.getElementById("video");
@@ -68,6 +71,7 @@ try {
 
 const W = video.videoWidth, H = video.videoHeight;
 const hairTracker = createHairTracker(vision);
+const handInput = createHandInput({ HandLandmarker, vision, W, H }); // 手モデルはアクション開始時に非同期で読み込む
 skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
 document.getElementById("camdot").className = "on";
@@ -414,6 +418,86 @@ function updateFace(now) {
   });
 }
 
+/* ---------------- 手のジェスチャー（#9：拳=充電、開く=シールド） ---------------- */
+const gestures = createGestureTracker();
+const armGlow = createArmGlow({ neonMat, metalMat });
+const shield = createShield(scene);
+let handSample = null, handAt = -Infinity, handArm = -1, handMs = 0, gestureFx = EFFECTS.NONE;
+const GESTURE_LABEL = { charging: "CHARGING", shield: "SHIELD" };
+
+// 効果と判定状態を止めて基準外観へ戻す（phase変更・BACK・RESET・認識喪失で共通）
+function stopGesture() {
+  gestures.reset();
+  handSample = null; handArm = -1;
+  shield.hide(); armGlow.restore(design); gestureFx = EFFECTS.NONE;
+  renderGestureHud({ state: "none", gesture: "none", progress: 0, effect: EFFECTS.NONE });
+}
+
+function renderGestureHud(r) {
+  const el = document.getElementById("gState");
+  if (!el) return;
+  let t;
+  if (r.effect !== EFFECTS.NONE) t = GESTURE_LABEL[r.effect] + (r.source === "button" ? " (BUTTON)" : "");
+  else if (handInput.status === "loading") t = "HAND MODEL LOADING…";
+  else if (handInput.status === "failed") t = "HAND OFF：ボタンで操作";
+  else if (r.state === "candidate") t = "HOLD… " + r.gesture.toUpperCase();
+  else if (r.state === "cooldown") t = "COOLDOWN";
+  else if (handInput.status !== "ready") t = "-";
+  else t = handSample ? (r.gesture === "unknown" ? "POSE ?" : r.gesture.toUpperCase()) : "NO HAND";
+  if (el.textContent !== t) el.textContent = t;
+  document.getElementById("gBar").style.width = Math.round(r.progress * 100) + "%";
+}
+
+function updateGesture(now, nowMs) {
+  const armOn = ARMS.some(a => a.g.visible);
+  if (exp.phase !== PHASES.ACTION) { if (gestureFx !== EFFECTS.NONE || handSample) stopGesture(); return; }
+
+  // 手の認識は腕が追跡されている間だけ。ボタン由来の効果は腕がなくても続ける。
+  if (!armOn) handSample = null;
+  if (armOn && handInput.status === "ready") {
+    const t1 = performance.now();
+    const hands = handInput.detect(video, nowMs);
+    if (hands) {
+      handMs = handMs * 0.8 + (performance.now() - t1) * 0.2;
+      const wrists = ARMS.map(a => { const j = joints[a.ids[2]]; return now - j.lastSeen < 0.3 ? { x: j.raw.x, y: j.raw.y } : null; });
+      handSample = selectHand(hands, wrists, bodyScale);
+      handArm = -1;
+      if (handSample) {
+        let best = Infinity;
+        wrists.forEach((w, k) => { if (!w) return; const d = Math.hypot(handSample.points[0].x - w.x, handSample.points[0].y - w.y); if (d < best) { best = d; handArm = k; } });
+      }
+      handAt = nowMs;
+    }
+  }
+  const fresh = handSample && nowMs - handAt <= HAND_CONFIG.staleMs ? handSample : null;
+  const r = gestures.update(fresh, nowMs, true);
+  if (!fresh && r.source !== "button") handArm = -1;
+
+  if (r.effect === EFFECTS.CHARGING) { armGlow.set(r.strength, design); gestureFx = r.effect; }
+  else if (gestureFx === EFFECTS.CHARGING) armGlow.restore(design);
+
+  if (r.effect === EFFECTS.SHIELD) {
+    const arm = handArm >= 0 && ARMS[handArm].g.visible ? ARMS[handArm] : ARMS.find(a => a.g.visible);
+    let center = new THREE.Vector3(W / 2, H / 2, 0); // 腕が映っていない時のボタン操作は画面中央へ
+    if (arm) {
+      const [, el, wr] = arm.ids.map(i => conv(joints[i].p));
+      const fd = new THREE.Vector3().subVectors(wr, el).normalize();
+      center = wr.clone().addScaledVector(fd, bodyScale * 0.35);
+    }
+    shield.update(center, bodyScale * 0.5, r.strength, design.neon, now);
+    gestureFx = r.effect;
+  } else shield.hide();
+  if (r.effect === EFFECTS.NONE) gestureFx = EFFECTS.NONE;
+  renderGestureHud(r);
+}
+
+function triggerGesture(effect) { // ボタン：手の判定と同じ状態機械を通す
+  const enabled = exp.phase === PHASES.ACTION;
+  const r = gestures.force(effect, performance.now(), enabled);
+  if (!r) say("少し待ってからもう一度押してください。");
+  else if (effect === EFFECTS.CHARGING && !ARMS.some(a => a.g.visible)) say("腕が映ると発光が見えます。");
+}
+
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS, EAR_MODELS } from './config.js';
@@ -454,6 +538,9 @@ function syncPhaseUI() {
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+  $("gCharge").hidden = !action; $("gShield").hidden = !action;
+  if (action && handInput.status === "idle") handInput.init().then(() => { if (handInput.status === "failed") say("手の認識を開始できません。ボタンで操作できます。"); });
+  if (!action) stopGesture();
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
 $("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
@@ -479,10 +566,13 @@ $("apply").onclick = () => {
 $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  stopGesture();
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   syncPhaseUI();
   say("装備選択に戻りました。");
 };
+$("gCharge").onclick = () => triggerGesture(EFFECTS.CHARGING);
+$("gShield").onclick = () => triggerGesture(EFFECTS.SHIELD);
 $("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
 let staffOpen = false;
 function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
@@ -500,6 +590,7 @@ function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  stopGesture();
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
@@ -591,6 +682,7 @@ function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
   $("conf").textContent = Math.round(conf * 100) + "%"; $("confbar").style.width = conf * 100 + "%";
   $("fps").textContent = fps.toFixed(0);
+  $("handms").textContent = handInput.status === "ready" ? handMs.toFixed(1) : "-";
   const on = ARMS.some(a => a.state === "tracking");
   for (const id of ["pose", "pill"]) $(id).className = on ? "ok" : "bad";
   $("pose").textContent = on ? "ACTIVE" : "LOST"; $("trk").textContent = on ? "ACTIVE" : "LOST";
@@ -618,6 +710,7 @@ function loop() {
     processFrame(result, now);
     if (face.ears || face.eyeMode !== "off") processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
     ARMS.forEach(a => updateArm(a, now));
+    updateGesture(now, t0);
     updateFace(now);
     drawSkel();
 

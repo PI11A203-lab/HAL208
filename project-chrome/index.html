@@ -31,20 +31,25 @@
     <div id="hud">
       <div id="confbox">TRACKING CONFIDENCE
         <div class="big"><span id="conf">0%</span></div><div class="bar"><i id="confbar"></i></div>
-        <small>CAMERA: <span id="camres">-</span><br>FPS: <span id="fps">0</span></small></div>
+        <small>CAMERA: <span id="camres">-</span><br>FPS: <span id="fps">0</span><br>HAND: <span id="handms">-</span> ms</small></div>
       <div class="lbl" id="lbl0"></div><div class="lbl" id="lbl1"></div><div class="lbl" id="lbl2"></div>
+      <div id="gestureBox">HAND GESTURE <b id="gState">-</b><div class="bar"><i id="gBar"></i></div></div>
       <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
     </div>
     <div id="actionBar">
       <div id="guide" hidden>
         <b>OPERATION GUIDE</b>
         <ul>
+          <li>拳を握って約0.3秒保持：充電（腕が発光）</li>
+          <li>手のひらを開いて保持：シールド。認識しにくい時は CHARGE / SHIELD ボタンでも試せます</li>
           <li>BACK TO SELECT：装備を変えられます（装備は残ります）</li>
           <li>装備を外すのはスタッフが行います</li>
         </ul>
       </div>
       <div class="actionBtns">
         <button id="capture">📷 撮影してPNG保存</button>
+        <button id="gCharge" hidden>⚡ CHARGE</button>
+        <button id="gShield" hidden>🛡 SHIELD</button>
         <button id="back" hidden>← BACK TO SELECT</button>
         <button id="help" hidden>? GUIDE</button>
       </div>
