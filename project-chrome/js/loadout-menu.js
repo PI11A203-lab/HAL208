@@ -9,6 +9,7 @@ export function createLoadoutMenu(document) {
     current = category;
     document.querySelectorAll('.tab[data-t]').forEach(tab => {
       const active = tab.dataset.t === category;
+      tab.disabled = false;
       tab.classList.toggle('sel', active);
       tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
       if (active) {
@@ -31,5 +32,6 @@ export function createLoadoutMenu(document) {
   });
   byId('categoryPrev').onclick = () => select(adjacentCategory(current, -1));
   byId('categoryNext').onclick = () => select(adjacentCategory(current, 1));
-  return { select };
+  select(current);
+  return { select, refresh() { select(current); } };
 }
