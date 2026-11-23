@@ -6,7 +6,7 @@
 <title>Project Chrome</title>
 <!-- Project Chrome 試作版（フェーズ5）：Webカメラで体を追跡し、サイバネティックな腕・猫耳・目のエフェクトを重ねて表示します。映像はこのPC内だけで処理されます。 -->
 <link rel="stylesheet" href="./css/style.css">
-<link rel="stylesheet" href="./css/exhibition.css">
+<link rel="stylesheet" href="./css/exhibition.css?v=30-mask-cards">
 
 <script type="importmap">
 { "imports": {
@@ -124,7 +124,11 @@
     </section>
     <section id="sec-mask" role="tabpanel" aria-labelledby="tab-mask" hidden>
       <h3>MASK <em>// FACIAL ARMOR</em></h3>
-      <label>Mask model <select id="maskModel"><option value="prototype">PROTOTYPE 04</option><option value="oni">ONI 04 / 鬼面</option><option value="rabbit">RABBIT 04 / ウサギ</option></select></label>
+      <div id="maskCards" class="head-cards mask-cards" role="group" aria-label="マスクを選択">
+        <button type="button" data-mask="prototype" aria-pressed="false"><img src="./assets/shop/mask-prototype.png" alt="機械式ハーフマスク"><span>PROTOTYPE 04</span></button>
+        <button type="button" data-mask="oni" aria-pressed="false"><img src="./assets/shop/mask-oni.png" alt="赤いLEDと牙のある鬼面"><span>ONI 04 / 鬼面</span></button>
+        <button type="button" data-mask="rabbit" aria-pressed="false"><img src="./assets/shop/mask-rabbit.png" alt="白い外装のウサギマスク"><span>RABBIT 04 / ウサギ</span></button>
+      </div>
       <label>マスクを装着 <input type="checkbox" id="maskOn"></label>
       <p class="note" id="maskStatus" role="status">ONにすると機械式ハーフマスクを試着できます。</p>
       <label>Armor color <input type="color" id="maskCol" value="#35383b"></label>
@@ -172,6 +176,6 @@
 
 <script type="module" src="./js/intro.js"></script>
 <script type="module" src="./js/collection.js"></script>
-<script type="module" src="./js/main.js?v=30-arms-satin"></script>
+<script type="module" src="./js/main.js?v=30-mask-cards"></script>
 </body>
 </html>

@@ -112,3 +112,16 @@ Blender正面レンダー、GLB再import、中央裏板の存在確認、lint・
 
 ユーザーの実カメラ画像に合わせ、初期高さを-0.05（顔幅の5%下）へ調整した。
 `MASK_DEFAULTS`を初期化とRESETで共用する。高さ0は顎先の幾何基準で、実際の初期値は-0.05。
+# 画像カードからの選択（2026-11-24）
+
+MASK内のPROTOTYPE 04・ONI 04・RABBIT 04は、耳と同じ画像カードで選ぶ。
+カードを押すと選択モデルをONにし、ON/OFF・選択枠・既定色を同期する。旧selectは撤去した。
+OFFとRESETで選択枠が消え、RESETはPROTOTYPE/OFFへ戻る。読み込み中の旧結果は既存の世代管理で無効化する。
+トグルボタンには`aria-pressed`を付け、Tab/Enter/Spaceで操作できる。
+カード画像は実際の3D原本から`render_mask_cards.py`で生成した512×384透過PNG。
+従来の大きなカメラと右側ストアの配置・ブルー系の色調は維持する。
+
+検証：WindowsのローカルWebで画像・3種切替・自動ON・OFF・RESET・白色固定を確認。
+カメラ接続は成功したが、顔が検出されない状態のため今回の実装後の実着用位置・PNG撮影は未確認。
+`npm ci --ignore-scripts --no-audit --no-fund`、`npm run lint`、`npm test`（121件）成功。
+

@@ -19,7 +19,7 @@ import { loadEarAsset } from './ear-model.js';
 import { loadMaskAsset } from './mask-model.js';
 import { fitMask } from './mask-fit.js';
 import { createLoadoutMenu } from './loadout-menu.js';
-import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-arms-satin';
+import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-mask-cards';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -763,6 +763,11 @@ const maskController = createEarController({
 });
 function syncMask() {
   maskError = '';
+  document.querySelectorAll('#maskCards button').forEach(button => {
+    const active = maskSettings.enabled && button.dataset.mask === maskSettings.model;
+    button.classList.toggle('sel', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   document.getElementById('maskCol').disabled = Boolean(MASK_MODELS[maskSettings.model].fixedColor);
   if (maskController.asset) maskController.asset.root.visible = false;
   maskController.setEnabled(maskSettings.enabled, maskSettings.model);
@@ -925,7 +930,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-arms-satin';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-mask-cards';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
@@ -1054,7 +1059,6 @@ function doReset() {
   $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
   $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
   Object.assign(maskSettings, MASK_DEFAULTS);
-  $('maskModel').value = maskSettings.model;
   $('maskOn').checked = maskSettings.enabled; $('maskSize').value = maskSettings.size;
   $('maskLift').value = maskSettings.lift;
   $('maskDepth').value = maskSettings.depth; $('maskCol').value = maskSettings.color; syncMask();
@@ -1082,8 +1086,12 @@ renderCards();
 syncPhaseUI();
 setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
 $('maskOn').onchange = event => { maskSettings.enabled = event.target.checked; syncMask(); };
-$('maskModel').onchange = event => {
-  maskSettings.model = event.target.value;
+$('maskCards').onclick = event => {
+  const button = event.target.closest('button[data-mask]');
+  if (!button || button.disabled || !MASK_MODELS[button.dataset.mask]) return;
+  maskSettings.model = button.dataset.mask;
+  maskSettings.enabled = true;
+  $('maskOn').checked = true;
   maskSettings.color = MASK_MODELS[maskSettings.model].color ?? MASK_DEFAULTS.color;
   $('maskCol').value = maskSettings.color;
   syncMask();

@@ -14,6 +14,7 @@ ASSETS=Path(__file__).resolve().parents[3]/'project-chrome/assets/models'
 
 def own(obj,parent):
     obj.parent=parent;obj.matrix_parent_inverse=Matrix.Identity(4)
+    if parent.name=='Hand':obj.scale*=parent.get('handVisualScale',1.0)
     obj['hal208_detail']='satin-mechanical-2026-11-24'
     return obj
 
@@ -84,22 +85,25 @@ def render(name,directory):
     camera.location=(2.4,-5,2.5);camera.rotation_euler=(Vector((0,-.15,1))-camera.location).to_track_quat('-Z','Y').to_euler()
     scene.render.filepath=str(directory/(name+'-satin.png'));bpy.ops.render.render(write_still=True)
 
-parser=argparse.ArgumentParser();parser.add_argument('--render-dir',type=Path)
-args=parser.parse_args(sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else [])
-if args.render_dir:args.render_dir.mkdir(parents=True,exist_ok=True)
-for name,rough in [('arm-mk1',.38),('arm-neon',.36),('arm-titan',.44)]:
-    bpy.ops.wm.open_mainfile(filepath=str(ASSETS/(name+'.blend')))
-    mats=[bpy.data.materials[n] for n in ['shell','joint','emission']]
-    colors=[tuple(next(n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED').inputs['Base Color'].default_value) for m in mats]
-    for mat,metal,r in [(mats[0],.40,rough),(mats[1],.18,.55)]:
-        node=next(n for n in mat.node_tree.nodes if n.type=='BSDF_PRINCIPLED')
-        node.inputs['Metallic'].default_value=metal;node.inputs['Roughness'].default_value=r
-        node.inputs['Coat Weight'].default_value=.10 if mat==mats[0] else 0
-        node.inputs['Coat Roughness'].default_value=.34
-    if name=='arm-neon':neon_details(mats)
-    assert colors==[tuple(next(n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED').inputs['Base Color'].default_value) for m in mats]
-    bpy.ops.wm.save_as_mainfile(filepath=str(ASSETS/(name+'.blend')),compress=True)
-    bpy.ops.export_scene.gltf(filepath=str(ASSETS/(name+'.glb')),export_format='GLB',export_yup=True,
-        export_apply=True,export_texcoords=False,export_cameras=False,export_lights=False,export_extras=True)
-    print('SATIN SAVED / COLORS PRESERVED:',name)
-    if args.render_dir:render(name,args.render_dir)
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--render-dir',type=Path)
+    args=parser.parse_args(sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else [])
+    if args.render_dir:args.render_dir.mkdir(parents=True,exist_ok=True)
+    for name,rough in [('arm-mk1',.38),('arm-neon',.36),('arm-titan',.44)]:
+        bpy.ops.wm.open_mainfile(filepath=str(ASSETS/(name+'.blend')))
+        mats=[bpy.data.materials[n] for n in ['shell','joint','emission']]
+        colors=[tuple(next(n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED').inputs['Base Color'].default_value) for m in mats]
+        for mat,metal,r in [(mats[0],.40,rough),(mats[1],.18,.55)]:
+            node=next(n for n in mat.node_tree.nodes if n.type=='BSDF_PRINCIPLED')
+            node.inputs['Metallic'].default_value=metal;node.inputs['Roughness'].default_value=r
+            node.inputs['Coat Weight'].default_value=.10 if mat==mats[0] else 0
+            node.inputs['Coat Roughness'].default_value=.34
+        if name=='arm-neon':neon_details(mats)
+        assert colors==[tuple(next(n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED').inputs['Base Color'].default_value) for m in mats]
+        bpy.ops.wm.save_as_mainfile(filepath=str(ASSETS/(name+'.blend')),compress=True)
+        bpy.ops.export_scene.gltf(filepath=str(ASSETS/(name+'.glb')),export_format='GLB',export_yup=True,
+            export_apply=True,export_texcoords=False,export_cameras=False,export_lights=False,export_extras=True)
+        print('SATIN SAVED / COLORS PRESERVED:',name)
+        if args.render_dir:render(name,args.render_dir)
+
+if __name__=='__main__':main()

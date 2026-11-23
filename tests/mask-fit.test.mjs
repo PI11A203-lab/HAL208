@@ -2,8 +2,70 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fitMask, adjacentCategory, LOADOUT_CATEGORIES } from '../project-chrome/js/mask-fit.js';
-import { MASK_MODEL, MASK_MODELS } from '../project-chrome/js/config.js';
+import { MASK_MODEL, MASK_MODELS, MASK_DEFAULTS } from '../project-chrome/js/config.js';
 import { createLoadoutMenu } from '../project-chrome/js/loadout-menu.js';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { parse } from 'espree';
+
+const mainSource = readFileSync(new URL('../project-chrome/js/main.js', import.meta.url),'utf8');
+const mainAst = parse(mainSource,{ecmaVersion:'latest',sourceType:'module',range:true});
+function maskPicker() {
+  const buttons = Object.keys(MASK_MODELS).map(mask => ({dataset:{mask},disabled:false,
+    attributes:{},classList:{toggle(name,value){ this[name]=value; }},
+    setAttribute(name,value){ this.attributes[name]=value; }}));
+  const elements = {maskOn:{checked:false},maskCol:{value:'',disabled:false}};
+  const calls=[];
+  const context=vm.createContext({MASK_MODELS,MASK_DEFAULTS,maskSettings:{model:'prototype',enabled:false},maskError:'',
+    $:id=>elements[id],document:{querySelectorAll:()=>buttons,getElementById:id=>elements[id]},
+    maskController:{asset:null,setEnabled:(enabled,id)=>calls.push([enabled,id])}});
+  const sync=mainAst.body.find(node=>node.type==='FunctionDeclaration'&&node.id.name==='syncMask');
+  vm.runInContext(mainSource.slice(...sync.range),context);
+  const handler=mainAst.body.find(node=>node.expression?.left?.property?.name==='onclick'
+    &&node.expression.left.object?.arguments?.[0]?.value==='maskCards').expression.right;
+  const click=vm.runInContext('('+mainSource.slice(...handler.range)+')',context);
+  return {buttons,elements,calls,context,click};
+}
+
+test('マスクの画像カードを押すと選んだ実モデルがONになり選択・色を同期する', () => {
+  const ui=maskPicker();
+  for (const button of ui.buttons) {
+    ui.click({target:{closest:()=>button}});
+    const id=button.dataset.mask;
+    assert.deepEqual(ui.calls.at(-1),[true,id]);
+    assert.equal(ui.elements.maskOn.checked,true);
+    assert.equal(button.attributes['aria-pressed'],'true');
+    assert.equal(ui.elements.maskCol.disabled,Boolean(MASK_MODELS[id].fixedColor));
+    assert.equal(ui.elements.maskCol.value,MASK_MODELS[id].color??'#35383b');
+    assert.equal(ui.buttons.filter(item=>item.classList.sel).length,1);
+  }
+  ui.context.maskSettings.enabled=false;ui.context.syncMask();
+  assert.ok(ui.buttons.every(button=>button.attributes['aria-pressed']==='false'));
+  Object.assign(ui.context.maskSettings,{model:'prototype',enabled:false});ui.context.syncMask();
+  assert.deepEqual(ui.calls.at(-1),[false,'prototype']);
+  assert.equal(ui.elements.maskCol.disabled,false);
+});
+
+test('準備中・不正なマスクカードは装備を変更しない', () => {
+  const ui=maskPicker();
+  for (const button of [null,{disabled:true,dataset:{mask:'oni'}},{dataset:{mask:'invalid'}}]) {
+    ui.click({target:{closest:()=>button}});
+  }
+  assert.equal(ui.calls.length,0);
+});
+
+test('マスク3種のカード画像は実ファイルのPNGを参照する', async () => {
+  const html=readFileSync(new URL('../project-chrome/index.html',import.meta.url),'utf8');
+  const section=html.match(/id="maskCards"[\s\S]*?<\/div>/)[0];
+  for (const id of Object.keys(MASK_MODELS)) {
+    assert.ok(section.includes('data-mask="'+id+'"'));
+    const bytes=await readFile(new URL('../project-chrome/assets/shop/mask-'+id+'.png',import.meta.url));
+    assert.equal(bytes.subarray(1,4).toString(),'PNG');
+    assert.equal(bytes.readUInt32BE(16),512);
+    assert.equal(bytes.readUInt32BE(20),384);
+  }
+  assert.ok(!html.includes('id="maskModel"'));
+});
 
 const face = { left: [-100, 0, 0], right: [100, 0, 0], forehead: [0, 120, 0],
   chin: [0, -140, 0], nose: [0, 10, 30] };
