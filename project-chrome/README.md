@@ -41,13 +41,30 @@ project-chrome/
 │   ├── main.js      起動、描画ループ、UIイベントの統合
 │   ├── config.js    デザイン一覧と初期設定
 │   ├── tracking.js  One Euro フィルター
-│   ├── arms.js      GLBモデル読み込みヘルパー
+│   ├── arms.js      GLB腕モデルの読込・表示
+│   ├── arm-model.js 腕モデルの規格と姿勢計算（Nodeテスト対象）
+│   ├── body-fit.js  人物マスクから腕の幅を測る（Nodeテスト対象）
+│   ├── gadget.js    腕のギミック（射出装置・弾）の表示
+│   ├── gadget-logic.js ギミックの溜め・発射・手の形の判定（Nodeテスト対象）
+│   ├── flame.js     炎（連番画像・火の粉・煙・光）
+│   ├── fx.js        プラズマ弾・閃光・衝撃波・火花・ケーブル・ネットの光の表現
+│   ├── bloom.js     光る物のにじみ（ブルーム）
+│   ├── env.js       カメラ映像からクロームの反射を作り、部屋の明るさに照明を合わせる
+│   ├── assembly.js  APPLY 時の装着演出のタイミング（Nodeテスト対象）
+│   ├── sfx.js       効果音の再生（Web Audio）
 │   ├── face.js      猫耳ジオメトリ
 │   └── ui.js        UI共通ヘルパー（段階的な分離用）
-└── models/          自作 .glb モデルを置く場所
+├── assets/models/   GLBモデルと規格（README.md）
+├── assets/fx/       炎の連番画像と作成スクリプト（README.md）
+└── assets/sfx/      効果音と合成スクリプト（README.md）
 ```
 
 ## 自作の猫耳・腕を追加する
+
+Blenderで耳を作り始める場合は[初期モデル生成と編集手順](../docs/blender-ears.md)を参照してください。
+HEADのEar modelでCLASSIC（従来形状）/PROTOTYPE 04（GLB）を選びます。
+GLBとBlender原本を同梱しています。PROTOTYPE 04を選ぶとGLBを読み込みます。
+実カメラでの追跡位置・PNGの見た目は展示PCで確認してください。
 
 ### 1. Blenderでモデルを作る
 
@@ -60,11 +77,71 @@ project-chrome/
 
 `js/arms.js` には Three.js の `GLTFLoader` を使う `loadGLB()` を用意しています。読み込んだモデルを既存の追跡グループに追加する処理は、モデルの原点・向き・スケールを確認してから接続してください。
 
-現時点では、既存の円柱・球体による腕とコード生成の猫耳がデフォルトです。GLBヘルパーは追加済みですが、モデルファイルがない状態でも従来の表示が維持されます。自作モデルの自動選択UIや、GLBへの完全な置き換えは次の実装ステップです。
+APPLY すると、選んだ装備のGLBモデル（MK-I：`arm-mk1.glb`、NEON EDGE：`arm-neon.glb`、TITAN FRAME：`arm-titan.glb`）を読み込んで表示します。モデルが読み込めない場合は案内を出し、円柱・球体の腕で表示を続けます。
+ARMS の `GADGET` は初期設定で AUTO になっており、手の形と動きでギミックが変わります（人差し指だけを上へ＝火、腕を上げて手を開く→握る＝PLASMA、人差し指と小指＝NET、人差し指を横に向けたピストルの形＝HOOK、拳で肘を勢いよく伸ばす＝FIST。画面左下に操作ガイドを表示）。PLASMA / NET / HOOK / FIST を1つ選んだ時は、腕をまっすぐ伸ばして肩の高さより上に向けると溜まり、腕を下ろすか拳を開くと発射します（`▶ FIRE（テスト）`・Gキーでもすぐ発射）。人差し指だけを上へ立てると指先に火が点きます。炎や弾の光の表現は `js/flame.js`・`js/fx.js`・`js/bloom.js`、炎の画像は `assets/fx/` です。FPS が低い時は TRACKING SETTINGS の `Effects quality` を LOW にします。
+
+APPLY すると、部品が上腕 → 前腕 → 手 → 指の順に飛んできてはまる装着演出が流れます（人が映ってから始まります）。クロームには実際の部屋が映り、部屋の明るさ・色に照明が合います（`Room reflections` で切り替え）。効果音は最初のクリックの後から鳴り、`Sound`・`Volume` または M キーで調整できます（`assets/sfx/README.md`）。
+腕の太さは、カメラに映った人の腕の実際の幅に合わせて自動で変わります。GLBの腕では、手を追跡して指が1本ずつ動きます（初回は手の追跡モデルの読み込みに数秒かかります）。
+腕モデルのノード名・原点・向き・縮尺・マテリアル名の規格は [assets/models/README.md](assets/models/README.md) を参照してください。
 
 ### 3. 猫耳の形をコードで調整する
 
 `js/face.js` の `earShape()` で輪郭を編集できます。より複雑な造形にしたい場合はBlenderで作った `.glb` を使う方法がおすすめです。
+
+## 体験の流れ（状態遷移）
+
+### 状態図
+
+```mermaid
+stateDiagram-v2
+    [*] --> select
+    select --> equipping: APPLY（EYES・HEADでも可）
+    equipping --> action: 約1秒後に自動
+    action --> select: 「← BACK TO SELECT」
+    equipping --> select: RESET（装着を取り消す）
+    action --> select: RESET（スタッフ用を含む）
+```
+
+※ RESETはどの状態からでも mk1・腕非表示・ARMS表示の初期状態に戻ります。図では代表的な経路だけを描いています。
+
+### 状態ごとの画面とボタン
+
+| 状態 | 右パネル | 映像上の腕 | ボタンの表示 | 案内 |
+|---|---|---|---|---|
+| select（装備選択） | 表示 | 表示しない | APPLY（有効）、RESET（表示） | なし |
+| equipping（装着中） | 表示 | 表示しない | APPLY（無効）、RESET（表示） | 「装着中…」（約3秒で消えるトースト） |
+| action（体験） | 非表示（映像を広げる） | 表示 | BACK（表示）、GUIDE（表示）、RESET（非表示） | GUIDEを押すと操作の説明を表示 |
+
+### 遷移条件
+
+| 操作・イベント | 有効な状態 | 結果 | 無効なときの扱い |
+|---|---|---|---|
+| APPLY（ARMS・EYES・HEAD） | select | equipping に入り、約1秒後に action へ進む | equipping中は無視（連打防止） |
+| APPLY（action中） | action | いったん select に戻してから装着し直す | — |
+| 約1秒の経過（完了） | equipping | action へ進む | 古い装着の完了は無視する |
+| BACK TO SELECT | action | select に戻る。選んでいた装備は残る | — |
+| RESET（来場者用） | すべて | 初期状態に戻し、装着中の完了も取り消す | — |
+| スタッフ用リセット（Ctrl + Shift + R） | すべて | RESETと同じ初期化 | 確認欄でEnterを押したときだけ実行 |
+
+### 追跡喪失の扱い
+
+- 腕を見失っても **状態（phase）は変わりません**。action のまま、腕だけ非表示になります。
+- 再び映ると、同じ action の中で腕が戻ります。
+- 追跡の状態は、画面右上の「POSE TRACKING」と右下の「TRACKING」で確認できます。
+
+### その他の注意
+
+- 装着中に BACK や RESET を押すと、待機中の装着は取り消されます。
+- EYES・HEADでの変更（目の色、猫耳など）は、APPLYを押さなくても即時に反映されます。
+- 状態の判定ロジックは `js/experience.js` にあり、`tests/experience.test.mjs` で確認しています。
+
+### スタッフ用リセット（来場者は使いません）
+
+- **Ctrl + Shift + R** で確認欄を出します。
+- **Enter** で実行、**Esc** で取り消しです。
+- 実行すると、装備・目・耳・腕・タブを初期状態（mk1、ARMS表示）に戻します。
+- 来場者向けのRESETと同じ初期化処理を通ります。
+
 
 ## 注意
 
