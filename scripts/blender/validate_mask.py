@@ -10,6 +10,7 @@ bpy.context.window.scene = scene
 bpy.ops.import_scene.gltf(filepath=str(asset))
 roots = [obj for obj in scene.objects if obj.name == 'MaskRoot']
 assert len(roots) == 1, 'MaskRoot is missing or duplicated'
+assert scene.objects.get('Closed center seam'), 'Center seam must have a continuous metal backing'
 assert all(obj.type not in {'CAMERA', 'LIGHT'} for obj in scene.objects), 'Studio leaked into GLB'
 meshes = [obj for obj in scene.objects if obj.type == 'MESH']
 assert len(meshes) > 20
@@ -24,5 +25,9 @@ size = maximum - minimum
 assert 2.4 < size.x < 2.8, size
 assert 1.5 < size.z < 1.8, size  # importer converts glTF Y-up back to Blender Z-up
 assert .5 < size.y < 1.1, 'Mask must wrap around the cheeks, not be flat'
+cheek_half_width = max(abs(point.x) for point in vertices if point.z > .1)
+jaw_half_width = max(abs(point.x) for point in vertices if point.z < -.65)
+assert jaw_half_width < cheek_half_width * .65, 'Lower jaw must taper inward from the cheeks'
 triangles = sum(sum(len(face.vertices)-2 for face in obj.data.polygons) for obj in meshes)
-print('MASK VALID:', len(meshes), 'meshes;', triangles, 'triangles; Blender Z-up size:', tuple(round(v, 3) for v in size))
+print('MASK VALID:', len(meshes), 'meshes;', triangles, 'triangles; Blender Z-up size:', tuple(round(v, 3) for v in size),
+      '; jaw/cheek width:', round(jaw_half_width / cheek_half_width, 3))

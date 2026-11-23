@@ -17,9 +17,11 @@ export function fitMask({ left, right, forehead, chin, nose }, { size = 1, lift 
   if (noseToChin < 1) return null;
   const sx = width * 1.08 / 2.533 * size;
   const sy = noseToChin / 1.55 * size;
-  // Model top center=(0,.61,.57). 鼻根を基準に上端を合わせる。
-  const origin = nose.map((v, i) => v + up[i] * (-.61 * sy + lift * width)
-    + forward[i] * (-.57 * sx + width * (.035 + depth)));
+  // 短縮後モデルの顎下端Y=-.856を顔の顎152へ合わせる。
+  // 鼻を高さの固定点にすると短縮分が上へ浮くため、顎を拡縮の支点にする。
+  const noseDepth = sub(nose, chin).reduce((sum, v, i) => sum + v * forward[i], 0);
+  const origin = chin.map((v, i) => v + up[i] * (.856 * sy + lift * width)
+    + forward[i] * (noseDepth - .57 * sx + width * (.035 + depth)));
   return { origin, right: horizontal, up, forward, scale: [sx, sy, sx] };
 }
 

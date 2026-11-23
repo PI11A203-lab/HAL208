@@ -2,6 +2,8 @@
 // 新しいアームのデザインは DESIGNS に追加します。
 export const DEFAULTS = { smooth: 0.5, depth: 0.5, thick: 1, showArm: true, showSkel: false };
 export const MASK_MODEL = { id: 'mask-prototype-04', name: 'PROTOTYPE 04', url: './assets/models/mask-prototype-04.glb' };
+// 顎基準から少し下げた試着位置。起動時とRESETで共通にする。
+export const MASK_DEFAULTS = { enabled: false, size: 1, lift: -0.05, depth: 0, color: '#35383b' };
 
 export const EAR_MODEL = {
   id: 'cyber-ears', name: 'PROTOTYPE 04',

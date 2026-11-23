@@ -8,14 +8,28 @@ import { createLoadoutMenu } from '../project-chrome/js/loadout-menu.js';
 const face = { left: [-100, 0, 0], right: [100, 0, 0], forehead: [0, 120, 0],
   chin: [0, -140, 0], nose: [0, 10, 30] };
 const close = (a, b) => assert.ok(Math.abs(a-b) < 1e-8, `${a} != ${b}`);
-test('マスクの鼻根と顎を独立した幅・高さで合わせる', () => {
+test('短縮したマスクの下端を顎先に合わせる', () => {
   const fit = fitMask(face);
   assert.deepEqual(fit.right, [1,0,0]);
   assert.deepEqual(fit.up, [0,1,0]);
   assert.deepEqual(fit.forward, [0,0,1]);
   close(fit.scale[0] * 2.533, 216);
-  close(fit.origin[1] + .61*fit.scale[1], face.nose[1]);
-  close(fit.origin[1] - .94*fit.scale[1], face.chin[1]);
+  close(fit.origin[1] - .856*fit.scale[1], face.chin[1]);
+});
+test('サイズ変更や頭の傾きでも顎を支点にし、高さ調整だけ指定分ずらす', () => {
+  const pitch = p => [p[0], p[1]*Math.cos(.35)-p[2]*Math.sin(.35), p[1]*Math.sin(.35)+p[2]*Math.cos(.35)];
+  const tilted = Object.fromEntries(Object.entries(face).map(([key, p]) => [key, pitch(p)]));
+  for (const points of [face, tilted]) {
+    for (const size of [.8, 1, 1.3]) {
+      for (const lift of [0, .1]) {
+        const fit = fitMask(points, {size, lift});
+        const bottom = fit.origin.map((v,i) => v - fit.up[i] * .856 * fit.scale[1]);
+        const offset = bottom.map((v,i) => v - points.chin[i]);
+        close(offset.reduce((sum,v,i) => sum + v * fit.up[i], 0), 200 * lift);
+        close(offset.reduce((sum,v,i) => sum + v * fit.right[i], 0), 0);
+      }
+    }
+  }
 });
 test('移動・距離・頭の回転を装着位置へ反映する', () => {
   const base = fitMask(face);

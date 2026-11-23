@@ -19,7 +19,7 @@ import { loadEarAsset } from './ear-model.js';
 import { loadMaskAsset } from './mask-model.js';
 import { fitMask } from './mask-fit.js';
 import { createLoadoutMenu } from './loadout-menu.js';
-import { MASK_MODEL } from './config.js';
+import { MASK_MODEL, MASK_DEFAULTS } from './config.js';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -744,7 +744,7 @@ function syncEarModel() {
 }
 
 // 耳と同じ非同期ライフサイクルを再利用（RESET/OFF中に完了した旧読込は破棄）。
-const maskSettings = { enabled: false, size: 1, lift: 0, depth: 0, color: '#35383b' };
+const maskSettings = { ...MASK_DEFAULTS };
 let maskError = '';
 const maskController = createEarController({
   load: () => loadMaskAsset(MASK_MODEL.url),
@@ -1052,9 +1052,10 @@ function doReset() {
   $("earFitStatus").textContent = '装着位置：髪の輪郭を基準に配置します。';
   $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
   $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
-  Object.assign(maskSettings, { enabled: false, size: 1, lift: 0, depth: 0, color: '#35383b' });
-  $('maskOn').checked = false; $('maskSize').value = 1; $('maskLift').value = 0;
-  $('maskDepth').value = 0; $('maskCol').value = maskSettings.color; syncMask();
+  Object.assign(maskSettings, MASK_DEFAULTS);
+  $('maskOn').checked = maskSettings.enabled; $('maskSize').value = maskSettings.size;
+  $('maskLift').value = maskSettings.lift;
+  $('maskDepth').value = maskSettings.depth; $('maskCol').value = maskSettings.color; syncMask();
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
   applyDesign(DESIGNS.mk1);
