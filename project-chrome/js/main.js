@@ -19,7 +19,7 @@ import { loadEarAsset } from './ear-model.js';
 import { loadMaskAsset } from './mask-model.js';
 import { fitMask } from './mask-fit.js';
 import { createLoadoutMenu } from './loadout-menu.js';
-import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-rabbit-mask';
+import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-rabbit-lower';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -763,6 +763,7 @@ const maskController = createEarController({
 });
 function syncMask() {
   maskError = '';
+  document.getElementById('maskCol').disabled = Boolean(MASK_MODELS[maskSettings.model].fixedColor);
   if (maskController.asset) maskController.asset.root.visible = false;
   maskController.setEnabled(maskSettings.enabled, maskSettings.model);
 }
@@ -924,7 +925,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-rabbit-mask';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-rabbit-lower';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
@@ -1091,6 +1092,7 @@ for (const [id, key] of [['maskSize', 'size'], ['maskLift', 'lift'], ['maskDepth
   $(id).oninput = event => { maskSettings[key] = +event.target.value; };
 }
 $('maskCol').oninput = event => {
+  if (MASK_MODELS[maskSettings.model].fixedColor) return;
   maskSettings.color = event.target.value; maskController.asset?.applyColor(maskSettings.color);
 };
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");

@@ -3,7 +3,7 @@
 Blender 5.3、新規プロセスから実行。編集用blendと同じ縮尺の4方向レンダーを保存する。
 """
 from pathlib import Path
-from math import pi,sin,cos,atan2,hypot
+from math import pi,sin,cos,atan2,hypot,sqrt,exp
 import argparse
 import sys
 import bpy
@@ -19,6 +19,19 @@ from refine_oni_mask import radial_loop
 OUTPUT=SCRIPT.parents[2]/'project-chrome/assets/models'
 BLEND=OUTPUT/'mask-rabbit-04.blend'
 surface=parts.surface
+
+
+def finish_materials():
+    # 弱いサテン反射で頬・鼻・装甲の曲率を見せる。LEDの発光量は変えない。
+    for name,roughness,coat in [('MaskShell',.36,.10),('RabbitArmor',.34,.10),
+            ('RabbitIvoryCheeks',.40,.12),('RabbitIvoryTeeth',.34,.10),('RabbitNosePink',.32,.14)]:
+        mat=bpy.data.materials[name]
+        node=next(node for node in mat.node_tree.nodes if node.type=='BSDF_PRINCIPLED')
+        node.inputs['Roughness'].default_value=roughness
+        node.inputs['Coat Weight'].default_value=coat
+        node.inputs['Coat Roughness'].default_value=.34
+        if name in {'MaskShell','RabbitArmor'}:
+            node.inputs['Base Color'].default_value=(.88,.90,.92,1)
 
 
 def closed_normals(obj):
@@ -179,6 +192,7 @@ def create():
     enamel=armor.material('RabbitIvoryTeeth',(.79,.73,.64),.02,.50)
     pink=armor.material('RabbitNosePink',(.70,.32,.34),.02,.46)
     led=armor.material('RabbitPastelLED',(.95,.31,.42),0,.50,.65)
+    finish_materials()
     armor.hardware=metal;armor.rubber=rubber
     # 微細な塗装粒子はBlender原本のみに保持する。
     for mat in [shell,raised]:
@@ -186,9 +200,18 @@ def create():
         noise=mat.node_tree.nodes.new('ShaderNodeTexNoise');noise.inputs['Scale'].default_value=340
         bump=mat.node_tree.nodes.new('ShaderNodeBump');bump.inputs['Strength'].default_value=.14;bump.inputs['Distance'].default_value=.0012
         mat.node_tree.links.new(noise.outputs['Fac'],bump.inputs['Height']);mat.node_tree.links.new(bump.outputs['Normal'],bsdf.inputs['Normal'])
-    outer=radial_loop([(0,.63),(.40,.67),(.81,.85),(1.19,1.03),(1.36,.81),(1.38,.30),
+    outer=radial_loop([(0,.91),(.40,.92),(.81,.94),(1.19,1.03),(1.36,.81),(1.38,.30),
         (1.25,-.29),(.87,-.74),(.35,-.94),(0,-.97),(-.35,-.94),(-.87,-.74),
-        (-1.25,-.29),(-1.38,.30),(-1.36,.81),(-1.19,1.03),(-.81,.85),(-.40,.67)],160)
+        (-1.25,-.29),(-1.38,.30),(-1.36,.81),(-1.19,1.03),(-.81,.94),(-.40,.92)],160)
+    # 丸い顎の左右を直線の面取りに置換。中央の短い顎先は残す。
+    clipped=[]
+    for x,z in outer:
+        if z<.90*abs(x)-1.35:
+            # 内周と同じ放射方向を維持し、面取りで帯のquadが交差しないようにする。
+            t=1.15/(.90*abs(x)-z-.20)
+            x,z=x*t,-.20+(z+.20)*t
+        clipped.append((x,z))
+    outer=clipped
     opening=radial_loop([(0,.47),(.40,.55),(.82,.48),(1.11,.18),(1.05,-.17),(.82,-.44),
         (.47,-.60),(0,-.65),(-.47,-.60),(-.82,-.44),(-1.05,-.17),(-1.11,.18),(-.82,.48),(-.40,.55)],160)
     n=len(outer);vertices=[];faces=[]
@@ -244,8 +267,8 @@ def create():
         parts.ring(side+' Hinge inner bevel',x,z,.111,metal,.17,.005)
         curved_light(side+' cheek light',[(1.16,.015),(1.115,-.19),(.975,-.395),(.79,-.555),(.60,-.64)],sign,frame)
         # 下端の別装甲を重ね、LED溝の端を挟む。
-        armor.plate(side+' lower armor cap',[(sign*x,z) for x,z in [(.54,-.61),(.76,-.64),(.91,-.76),(.56,-.89),(.38,-.77)]],raised,.13,.05,6)
-        small_light(side+' lower marker',sign,.69,-.79,.105)
+        armor.plate(side+' lower armor cap',[(sign*x,z) for x,z in [(.48,-.62),(.68,-.63),(.80,-.61),(.63,-.78),(.49,-.85),(.35,-.76)]],raised,.13,.05,3)
+        small_light(side+' lower marker',sign,.60,-.76,.105)
         for index,(x,z,offset) in enumerate([(.92,.49,.19),(.62,-.62,.16),(1.075,.82,.20)]):
             armor.bolt(side+' Frame screw '+str(index),sign*x,z,offset,.018)
         # 頬の上端の小さい止めねじ。アイボリ面に直交させる。
@@ -279,7 +302,23 @@ def create():
     for sign in [-1,1]:
         armor.plate('Chin side recess '+str(sign),[(sign*.27,-.55),(sign*.30,-.54),(sign*.34,-.63),(sign*.31,-.64)],rubber,.13,.014,3)
     root=armor.root;root['hal208_model']='RABBIT 04 / separate editable facial mask'
+    root['fixedArmorColor']='#ffffff'
     root['reference']='User supplied 2026-11-24 00:38:36, front expression and 45deg cheek volume'
+    # 正面パネルを鼻中心で柔らかく折り、頬の外側は顔の側面へ後退させる。
+    # 部品全体を同じ連続変形に通し、LEDと溝・前歯と頬の相対位置を保つ。
+    for obj in list(root.children_recursive):
+        if obj.type not in {'MESH','CURVE'}:continue
+        for other in bpy.context.selected_objects:other.select_set(False)
+        obj.select_set(True);bpy.context.view_layer.objects.active=obj
+        if obj.type=='CURVE':bpy.ops.object.convert(target='MESH')
+        armor.apply_geometry(obj)
+        matrix=obj.matrix_world.copy();inverse=matrix.inverted()
+        for vertex in obj.data.vertices:
+            p=matrix@vertex.co
+            p.y+=.32*(sqrt(p.x*p.x+.12*.12)-.12)-.14*exp(-(p.x/.38)**2)
+            vertex.co=inverse@p
+        closed_normals(obj);obj.data.update()
+    root['facial_wrap']='soft central V: outer cheeks recede, nose projects forward'
     bpy.context.view_layer.update()
     corners=[obj.matrix_world@Vector(v) for obj in root.children_recursive if obj.type in {'MESH','CURVE'} for v in obj.bound_box]
     width=max(p.x for p in corners)-min(p.x for p in corners);minz=min(p.z for p in corners);maxz=max(p.z for p in corners)

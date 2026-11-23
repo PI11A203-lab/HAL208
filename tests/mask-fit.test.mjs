@@ -113,6 +113,17 @@ test('ONIは牙・六角網・赤色LEDを持ち、専用比率でも顎を支�
   close(fit.scale[1]*definition.heightSpan, 150);
 });
 
+test('ウサギは縦伸びを抑え、サイズ変更時も横幅と顎の支点を維持する', () => {
+  const definition = MASK_MODELS.rabbit;
+  for (const size of [.8, 1, 1.3]) {
+    const before = fitMask(face, { size }, { ...definition, heightSpan: 1.30 });
+    const after = fitMask(face, { size }, definition);
+    close(after.scale[0], before.scale[0]);
+    close(after.origin[1] - .856*after.scale[1], face.chin[1] + 200*definition.liftOffset);
+    assert.ok(after.scale[1] / before.scale[1] < .65);
+    assert.ok(after.scale[1] / before.scale[1] > .55);
+  }
+});
 test('ウサギ顔マスクは頬・前歯・ピンクLEDを保持し、顎基準で装着する', async () => {
   const definition = MASK_MODELS.rabbit;
   const bytes = await readFile(new URL(`../project-chrome/${definition.url}`, import.meta.url));
@@ -127,10 +138,27 @@ test('ウサギ顔マスクは頬・前歯・ピンクLEDを保持し、顎基�
     assert.ok(gltf.materials.some(mat => mat.name === name), name);
   }
   const led = gltf.materials.find(mat => mat.name === 'RabbitPastelLED');
+  assert.equal(definition.color, '#ffffff');
+  assert.equal(definition.fixedColor, true);
+  assert.equal(gltf.nodes.find(node => node.name === 'MaskRoot').extras.fixedArmorColor, '#ffffff');
+  for (const name of ['MaskShell','RabbitArmor']) {
+    const material = gltf.materials.find(mat => mat.name === name);
+    assert.ok(material.pbrMetallicRoughness.baseColorFactor.slice(0,3).every(value => value > .85));
+  }
   assert.ok(led.emissiveFactor[0] > led.emissiveFactor[1]*2);
   assert.ok(gltf.buffers.every(buffer => !buffer.uri));
   assert.ok(!gltf.cameras?.length);
   const fit = fitMask(face, {}, definition);
-  close(fit.origin[1] - .856*fit.scale[1], face.chin[1]);
+  close(fit.origin[1] - .856*fit.scale[1], face.chin[1] + 200*definition.liftOffset);
   close(fit.scale[1]*definition.heightSpan, 150);
+});
+
+test('ウサギの位置補正は顔の上方向へ作用し、高さスライダーを加算できる', () => {
+  const definition = MASK_MODELS.rabbit;
+  const angle = .35;
+  const rotate = ([x,y,z]) => [x*Math.cos(angle)-y*Math.sin(angle),x*Math.sin(angle)+y*Math.cos(angle),z];
+  const points = Object.fromEntries(Object.entries(face).map(([key,p]) => [key,rotate(p)]));
+  const before = fitMask(points, {}, {...definition, liftOffset:0});
+  const after = fitMask(points, {lift:.02}, definition);
+  for (let i=0;i<3;i++) close(after.origin[i]-before.origin[i],after.up[i]*200*(definition.liftOffset+.02));
 });

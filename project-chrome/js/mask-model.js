@@ -27,7 +27,9 @@ export function loadMaskAsset(url) {
         textures.forEach(texture => texture.dispose());
       };
       try {
-        if (!source.getObjectByName('MaskRoot')) throw new Error('MaskRootがありません');
+        const modelRoot = source.getObjectByName('MaskRoot');
+        if (!modelRoot) throw new Error('MaskRootがありません');
+        const fixedArmorColor = modelRoot.userData.fixedArmorColor;
         source.traverse(node => {
           if (!node.isMesh) return;
           if (Array.isArray(node.material)) throw new Error('マスクの材質をprimitiveごとに分けてください');
@@ -54,7 +56,7 @@ export function loadMaskAsset(url) {
         let disposed = false;
         resolve({ root, applyColor(color) {
           materials.forEach(material => {
-            if (['MaskShell', 'MaskLowerArmor', 'OniRaisedArmor', 'RabbitArmor'].includes(material.name)) material.color.set(color);
+            if (['MaskShell', 'MaskLowerArmor', 'OniRaisedArmor', 'RabbitArmor'].includes(material.name)) material.color.set(fixedArmorColor ?? color);
           });
         }, dispose() { if (!disposed) { disposed = true; dispose(); } } });
       } catch (error) { dispose(); reject(error); }

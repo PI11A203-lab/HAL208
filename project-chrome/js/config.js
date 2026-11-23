@@ -7,7 +7,7 @@ export const MASK_MODELS = {
   oni: { id: 'mask-oni-04', name: 'ONI 04', url: './assets/models/mask-oni-04-fit.glb',
     heightSpan: 2.22, widthScale: 1.02, color: '#24272b' },
   rabbit: { id: 'mask-rabbit-04', name: 'RABBIT 04', url: './assets/models/mask-rabbit-04.glb',
-    heightSpan: 1.30, widthScale: 1.02, color: '#303236' },
+    heightSpan: 2.15, widthScale: 1.02, liftOffset: 0.10, color: '#ffffff', fixedColor: true },
 };
 // 顎基準から少し下げた試着位置。起動時とRESETで共通にする。
 export const MASK_DEFAULTS = { model: 'prototype', enabled: false, size: 1, lift: -0.05, depth: 0, color: '#35383b' };

@@ -1,6 +1,6 @@
 """編集用ウサギ顔マスクの閉曲面・部品分離・奥行きをBlenderで検証。"""
 from pathlib import Path
-from math import isfinite
+from math import isfinite,sqrt,exp
 import bpy
 import bmesh
 from mathutils import Vector
@@ -28,7 +28,9 @@ for side in ['Left','Right']:
     channel=scene.objects[side+' cheek light recessed channel']
     # Compare the surface offsets (remove the curved face base depth).
     def offsets(obj):
-        return [-v.co.y-(.42-.67*(abs(v.co.x)/1.30)**2) for v in obj.data.vertices]
+        coords=[obj.matrix_local@v.co for v in obj.data.vertices]
+        return [-p.y-(.42-.67*(abs(p.x)/1.30)**2)+
+                .32*(sqrt(p.x*p.x+.12*.12)-.12)-.14*exp(-(p.x/.38)**2) for p in coords]
     assert max(offsets(channel))>max(offsets(light))+.04,'LED is not behind its channel lip'
 
 left=points(scene.objects['Left short front tooth'])
@@ -36,6 +38,13 @@ right=points(scene.objects['Right short front tooth'])
 assert min(p.x for p in right)-max(p.x for p in left)>.005,'Front teeth have no gap'
 assert scene.objects['Soft pink triangular nose'].type=='MESH'
 assert scene.objects.get('Rounded chin armor')
+assert root.get('facial_wrap'),'Missing nose-centered facial wrap'
+assert root.get('fixedArmorColor')=='#ffffff'
+frame=points(scene.objects['Charcoal continuous facial frame'])
+assert max(p.z for p in frame if abs(p.x)<.08)>.94,'Central nose bridge is too low'
+nose_front=max(-p.y for p in points(scene.objects['Soft pink triangular nose']))
+hinge_front=max(-p.y for p in points(scene.objects['Right Hinge cap']))
+assert nose_front-hinge_front>.85,'Nose and outer cheeks are too flat'
 corners=[obj.matrix_world@Vector(v) for obj in root.children_recursive
          if obj.type in {'MESH','CURVE'} for v in obj.bound_box]
 assert all(isfinite(v) for p in corners for v in p)
