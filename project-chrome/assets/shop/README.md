@@ -19,4 +19,3 @@ blender --background --python scripts/blender/render_shop_products.py
 `mask-prototype.png`、`mask-oni.png`、`mask-rabbit.png`は最新の編集用Blender原本から生成した透過PNG（512×384）。
 `scripts/blender/render_mask_cards.py`をBlender 5.3で実行して更新する。原本へは保存しない。
 商品カードはMASK内の3種選択に使用し、選択するとON・色・選択枠を同期する。
-

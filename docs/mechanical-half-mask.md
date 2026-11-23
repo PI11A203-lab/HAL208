@@ -124,4 +124,3 @@ OFFとRESETで選択枠が消え、RESETはPROTOTYPE/OFFへ戻る。読み込み
 検証：WindowsのローカルWebで画像・3種切替・自動ON・OFF・RESET・白色固定を確認。
 カメラ接続は成功したが、顔が検出されない状態のため今回の実装後の実着用位置・PNG撮影は未確認。
 `npm ci --ignore-scripts --no-audit --no-fund`、`npm run lint`、`npm test`（121件）成功。
-
