@@ -1158,6 +1158,10 @@ function onCameraChange({ state, reason, width, height }) {
     $("camdot").className = "";
     $("cam").textContent = "WAIT"; $("cam").className = "";
     setCamPanel(true, "カメラを準備中です...");
+    } else if (state === "idle") {
+  // 停止（画面からは呼ばない）。案内は出さない
+  $("camdot").className = "";
+  setCamPanel(false);
   } else {                                   // lost / error
     enterCameraLoss();
     $("camdot").className = "";

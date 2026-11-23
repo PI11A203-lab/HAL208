@@ -298,7 +298,6 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
       planes.forEach((p) => { p.geometry.dispose(); p.material.dispose(); });
       eGeo.dispose(); eMat.dispose();
       puffs.forEach((p) => p.material.dispose());
-      lamp?.dispose();
     },
   };
 }

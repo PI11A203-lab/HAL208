@@ -79,19 +79,20 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
     const gl = renderer.getContext();
     const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
     const px = new Uint8Array(4);
-    let black = 0, total = 0;
+    let darkCount = 0, total = 0;
     for (let y = 1; y < 8; y++) {
       for (let x = 1; x < 8; x++) {
         gl.readPixels(Math.floor(w * x / 8), Math.floor(h * y / 8), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
         total++;
-        if (px[3] > 200 && Math.max(px[0], px[1], px[2]) < 16) black++;
+        if (px[3] > 200 && Math.max(px[0], px[1], px[2]) < 16) darkCount++;
       }
     }
-    if (black > total * 0.6) {
+    if (darkCount > total * 0.6) {
       usable = false;
       console.warn('ブルーム（にじみ）で画面が黒くなったため、にじみを止めました。');
     }
   }
+
 
   return {
     get strength() { return mixMat.uniforms.strength.value; },
