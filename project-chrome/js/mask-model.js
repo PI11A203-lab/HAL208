@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { loadGLB } from './arms.js';
 
-// 編集原本の207部品は保ち、表示時だけ材質単位にまとめてdraw callを減らす。
+// 編集原本の独立した部品は保ち、表示時だけ材質単位にまとめてdraw callを減らす。
 export function loadMaskAsset(url) {
   return new Promise((resolve, reject) => {
     loadGLB(url, source => {
@@ -54,7 +54,7 @@ export function loadMaskAsset(url) {
         let disposed = false;
         resolve({ root, applyColor(color) {
           materials.forEach(material => {
-            if (['MaskShell', 'MaskLowerArmor'].includes(material.name)) material.color.set(color);
+            if (['MaskShell', 'MaskLowerArmor', 'OniRaisedArmor'].includes(material.name)) material.color.set(color);
           });
         }, dispose() { if (!disposed) { disposed = true; dispose(); } } });
       } catch (error) { dispose(); reject(error); }

@@ -4,7 +4,7 @@ const length = a => Math.hypot(...a);
 const unit = a => a.map(v => v / length(a));
 const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
 
-export function fitMask({ left, right, forehead, chin, nose }, { size = 1, lift = 0, depth = 0 } = {}) {
+export function fitMask({ left, right, forehead, chin, nose }, { size = 1, lift = 0, depth = 0 } = {}, definition = {}) {
   const points = [left, right, forehead, chin, nose];
   if (!points.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite))) return null;
   if (![size, lift, depth].every(Number.isFinite) || size <= 0) return null;
@@ -15,8 +15,8 @@ export function fitMask({ left, right, forehead, chin, nose }, { size = 1, lift 
   const forward = unit(forwardRaw), horizontal = unit(cross(up, forward));
   const noseToChin = Math.abs(sub(nose, chin).reduce((sum, v, i) => sum + v * up[i], 0));
   if (noseToChin < 1) return null;
-  const sx = width * 1.08 / 2.533 * size;
-  const sy = noseToChin / 1.55 * size;
+  const sx = width * (definition.widthScale ?? 1.08) / 2.533 * size;
+  const sy = noseToChin / (definition.heightSpan ?? 1.55) * size;
   // 短縮後モデルの顎下端Y=-.856を顔の顎152へ合わせる。
   // 鼻を高さの固定点にすると短縮分が上へ浮くため、顎を拡縮の支点にする。
   const noseDepth = sub(nose, chin).reduce((sum, v, i) => sum + v * forward[i], 0);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fitMask, adjacentCategory, LOADOUT_CATEGORIES } from '../project-chrome/js/mask-fit.js';
-import { MASK_MODEL } from '../project-chrome/js/config.js';
+import { MASK_MODEL, MASK_MODELS } from '../project-chrome/js/config.js';
 import { createLoadoutMenu } from '../project-chrome/js/loadout-menu.js';
 
 const face = { left: [-100, 0, 0], right: [100, 0, 0], forehead: [0, 120, 0],
@@ -89,4 +89,26 @@ test('マスク配布GLBが自己完結し正しいrootと外殻材質を持つ'
   assert.ok(gltf.materials.some(material => material.name === 'MaskShell'));
   assert.ok(gltf.buffers.every(buffer => !buffer.uri));
   assert.ok(!gltf.cameras?.length);
+});
+test('ONIは牙・六角網・赤色LEDを持ち、専用比率でも顎を支点にする', async () => {
+  const definition = MASK_MODELS.oni;
+  const bytes = await readFile(new URL(`../project-chrome/${definition.url}`, import.meta.url));
+  const gltf = JSON.parse(bytes.subarray(20, 20+bytes.readUInt32LE(12)).toString());
+  assert.equal(bytes.readUInt32LE(0), 0x46546c67);
+  assert.equal(bytes.readUInt32LE(8), bytes.length);
+  assert.equal(gltf.nodes.filter(node => node.name === 'MaskRoot').length, 1);
+  for (const name of ['Left Upper canine','Right Upper canine','Left Lower canine','Right Lower canine']) {
+    assert.ok(gltf.nodes.some(node => node.name === name));
+  }
+  for (const name of ['Upper wraparound facial armor','Lower overlapping fang armor']) {
+    assert.ok(gltf.nodes.some(node => node.name === name), '改修版の装甲が必要');
+  }
+  assert.ok(gltf.nodes.filter(node => node.name?.startsWith('Honeycomb wire')).length > 100);
+  assert.ok(gltf.materials.some(mat => mat.name === 'OniCeramicTeeth'));
+  const led = gltf.materials.find(mat => mat.name === 'MaskLED');
+  assert.ok(led.emissiveFactor[0] > led.emissiveFactor[1]*10);
+  assert.ok(gltf.buffers.every(buffer => !buffer.uri));
+  const fit = fitMask(face, {}, definition);
+  close(fit.origin[1] - .856*fit.scale[1], face.chin[1]);
+  close(fit.scale[1]*definition.heightSpan, 150);
 });
