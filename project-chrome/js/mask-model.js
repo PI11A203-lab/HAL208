@@ -54,7 +54,7 @@ export function loadMaskAsset(url) {
         let disposed = false;
         resolve({ root, applyColor(color) {
           materials.forEach(material => {
-            if (['MaskShell', 'MaskLowerArmor', 'OniRaisedArmor'].includes(material.name)) material.color.set(color);
+            if (['MaskShell', 'MaskLowerArmor', 'OniRaisedArmor', 'RabbitArmor'].includes(material.name)) material.color.set(color);
           });
         }, dispose() { if (!disposed) { disposed = true; dispose(); } } });
       } catch (error) { dispose(); reject(error); }

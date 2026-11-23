@@ -19,7 +19,7 @@ import { loadEarAsset } from './ear-model.js';
 import { loadMaskAsset } from './mask-model.js';
 import { fitMask } from './mask-fit.js';
 import { createLoadoutMenu } from './loadout-menu.js';
-import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-oni-cheeks';
+import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-rabbit-mask';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -924,7 +924,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-oni-cheeks';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-rabbit-mask';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始

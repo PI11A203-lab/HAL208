@@ -242,6 +242,12 @@ PROTOTYPE 04は最初のON時に読込。OFF/RESET中に完了した旧request�
 MASKメニューのON/OFFから顔追従で試着できる。実カメラの装着精度は確認待ち。
 編集・軸・再生成・検証は[制作ガイド](../../../docs/mechanical-half-mask.md)を参照。
 
+## RABBIT 04 顔マスク
+
+`mask-rabbit-04.blend` / `mask-rabbit-04.glb`はアイボリの頬・前歯とピンクLEDを持つウサギ顔マスク。
+既存のウサギ耳とは別モデルで、MASKの`RABBIT 04 / ウサギ`から選択する。
+部品編集・生成・検証は[ウサギ顔マスク制作ガイド](../../../docs/rabbit-face-mask.md)を参照。
+
 ## ONI 04 鬼面
 `mask-oni-04.blend` / `mask-oni-04.glb`は立体の牙・鼻孔・六角金網・赤色発光部を備える別モデル。
 MASKのモデル選択から切り替え可能。編集・比率・検証は[ONI制作ガイド](../../../docs/oni-mask.md)を参照。

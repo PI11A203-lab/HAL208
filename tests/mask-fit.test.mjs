@@ -112,3 +112,25 @@ test('ONIは牙・六角網・赤色LEDを持ち、専用比率でも顎を支�
   close(fit.origin[1] - .856*fit.scale[1], face.chin[1]);
   close(fit.scale[1]*definition.heightSpan, 150);
 });
+
+test('ウサギ顔マスクは頬・前歯・ピンクLEDを保持し、顎基準で装着する', async () => {
+  const definition = MASK_MODELS.rabbit;
+  const bytes = await readFile(new URL(`../project-chrome/${definition.url}`, import.meta.url));
+  assert.equal(bytes.readUInt32LE(0), 0x46546c67);
+  assert.equal(bytes.readUInt32LE(8), bytes.length);
+  const gltf = JSON.parse(bytes.subarray(20, 20+bytes.readUInt32LE(12)).toString());
+  assert.equal(gltf.nodes.filter(node => node.name === 'MaskRoot').length, 1);
+  for (const name of ['Left ivory cheek','Right ivory cheek','Left short front tooth',
+    'Right short front tooth','Soft pink triangular nose','Left cheek light pastel LED',
+    'Right cheek light recessed channel']) assert.ok(gltf.nodes.some(node => node.name === name), name);
+  for (const name of ['RabbitIvoryCheeks','RabbitIvoryTeeth','RabbitNosePink','RabbitArmor']) {
+    assert.ok(gltf.materials.some(mat => mat.name === name), name);
+  }
+  const led = gltf.materials.find(mat => mat.name === 'RabbitPastelLED');
+  assert.ok(led.emissiveFactor[0] > led.emissiveFactor[1]*2);
+  assert.ok(gltf.buffers.every(buffer => !buffer.uri));
+  assert.ok(!gltf.cameras?.length);
+  const fit = fitMask(face, {}, definition);
+  close(fit.origin[1] - .856*fit.scale[1], face.chin[1]);
+  close(fit.scale[1]*definition.heightSpan, 150);
+});
