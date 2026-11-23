@@ -236,3 +236,8 @@ PROTOTYPE 04は最初のON時に読込。OFF/RESET中に完了した旧request�
 ## LEDウサギ耳
 `ears-rabbit-led.blend` / `ears-rabbit-led.glb`は#25の内周LED付きウサギ耳。
 制作・材質・実際のくぼみ寸法・再生成・操作は[LEDウサギ耳](../../../docs/rabbit-led-ears.md)を参照。
+
+## 機械式ハーフマスク（制作中）
+`mask-prototype-04.blend` / `mask-prototype-04.glb`は#30の曲面装甲マスク。
+MASKメニューのON/OFFから顔追従で試着できる。実カメラの装着精度は確認待ち。
+編集・軸・再生成・検証は[制作ガイド](../../../docs/mechanical-half-mask.md)を参照。

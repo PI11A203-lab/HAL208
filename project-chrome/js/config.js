@@ -1,6 +1,7 @@
 // デザイン一覧と初期設定（日本語コメント）
 // 新しいアームのデザインは DESIGNS に追加します。
 export const DEFAULTS = { smooth: 0.5, depth: 0.5, thick: 1, showArm: true, showSkel: false };
+export const MASK_MODEL = { id: 'mask-prototype-04', name: 'PROTOTYPE 04', url: './assets/models/mask-prototype-04.glb' };
 
 export const EAR_MODEL = {
   id: 'cyber-ears', name: 'PROTOTYPE 04',
