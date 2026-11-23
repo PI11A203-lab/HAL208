@@ -99,6 +99,23 @@ test('同梱のGLBに必須ノード・マテリアルがあり、外部ファ�
   }
 });
 
+test('腕3種の配色を保ち、WebとGLBにサテン塗装を適用する', async () => {
+  const palette = {mk1:[0xaab2ba,0x1a1e24,0x00e5ff],neon:[0x0b0f13,0x05080a,0x00e5ff],titan:[0x8c9097,0x18191c,0xffb300]};
+  for (const [key,design] of Object.entries(DESIGNS)) {
+    assert.deepEqual([design.metal,design.joint,design.neon],palette[key]);
+    const {json} = await readGlbJson(new URL(ARM_MODELS[design.model].url,root));
+    const shell = json.materials.find(mat => mat.name === 'shell');
+    close(shell.pbrMetallicRoughness.roughnessFactor,Math.fround(design.rough),'Webと原本のroughness');
+    assert.ok(shell.pbrMetallicRoughness.metallicFactor < .5);
+    assert.ok(shell.extensions.KHR_materials_clearcoat.clearcoatFactor > .05);
+    if (key === 'neon') {
+      for (const name of ['NEON forearm central armor','NEON backhand armor','NEON fore recessed mechanisms']) {
+        assert.ok(json.nodes.some(node => node.name === name),name);
+      }
+    }
+  }
+});
+
 test('手の長さの比率と左右反転の設定が正しい型である', () => {
   for (const [id, model] of Object.entries(ARM_MODELS)) {
     if (model.handRatio !== undefined) {

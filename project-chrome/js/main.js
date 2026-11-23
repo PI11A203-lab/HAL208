@@ -19,7 +19,7 @@ import { loadEarAsset } from './ear-model.js';
 import { loadMaskAsset } from './mask-model.js';
 import { fitMask } from './mask-fit.js';
 import { createLoadoutMenu } from './loadout-menu.js';
-import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-rabbit-lower';
+import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=30-arms-satin';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -116,7 +116,7 @@ camera.position.z = 2000;
 const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
 /* ---------------- ロボットアームモデル ---------------- */
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
+const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.4, roughness: 0.38 });
 const jointMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
 const neonMat  = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 
@@ -925,7 +925,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-rabbit-lower';
+import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=30-arms-satin';
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
