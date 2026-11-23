@@ -30,7 +30,7 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
   // 描画先は 8bit（どのPC・ブラウザーでも描画できる形式）。小数の形式（HalfFloat）は描画できない環境があり、
   // その場合は中身が不定になって画面全体が黒くなることがあるため使わない
   const opts = { type: THREE.UnsignedByteType, depthBuffer: false };
-  const size = (k) => [Math.max(1, Math.round(width / k)), Math.max(1, Math.round(height / k))];
+  const size = (k, w = width, h = height) => [Math.max(1, Math.round(w / k)), Math.max(1, Math.round(h / k))];
   const src = new THREE.WebGLRenderTarget(...size(2), { type: THREE.UnsignedByteType });
   const levels = [4, 8].map((k) => [new THREE.WebGLRenderTarget(...size(k), opts), new THREE.WebGLRenderTarget(...size(k), opts)]);
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -121,6 +121,17 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
       renderer.autoClear = autoClear;
       frames++;
       if (frames === 10 || frames === 60 || frames === 300) checkScreen();
+    },
+    // 映像サイズが変わった時に呼ぶ。作り直さず描画先の大きさだけを変える
+    setSize(w, h) {
+      src.setSize(...size(2, w, h));
+      [4, 8].forEach((k, i) => {
+        const [sw, sh] = size(k, w, h);
+        levels[i][0].setSize(sw, sh);
+        levels[i][1].setSize(sw, sh);
+      });
+      usable = null;   // 次の描画で描画先を確かめ直す
+      frames = 0;      // 黒画面の確認も数え直す
     },
     dispose() {
       src.dispose();

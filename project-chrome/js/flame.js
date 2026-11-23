@@ -285,6 +285,15 @@ export function createFlame({ variant = 'fire', light = true, embers = 40, smoke
         lamp.intensity = visible ? level * (9 + 2.5 * Math.sin(time * 19) + 1.5 * Math.sin(time * 31)) : 0;
       }
     },
+    // 映像が止まった時などに即座に消す（フェードさせない）。次の update で必要になれば再び点く
+    reset() {
+      level = 0;
+      planes.forEach((p) => { p.visible = false; });
+      for (let i = 0; i < embers; i++) { eLife[i] = 0; ePos[i * 3 + 2] = -1e5; }
+      eGeo.attributes.position.needsUpdate = true;
+      puffs.forEach((p) => { p.visible = false; p.userData.life = 0; });
+      if (lamp) lamp.intensity = 0;
+    },
     dispose() {
       planes.forEach((p) => { p.geometry.dispose(); p.material.dispose(); });
       eGeo.dispose(); eMat.dispose();
