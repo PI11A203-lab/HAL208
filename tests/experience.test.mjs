@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createExperience, reduceExperience, EVENTS, PHASES,
+  createExperience, reduceExperience, armDisplayMode, EVENTS, PHASES,
 } from "../project-chrome/js/experience.js";
 
 test("初期状態は選択画面で、装着していない", () => {
@@ -83,4 +83,30 @@ test("不明なイベントや無効な選択IDは状態を変えない", () => 
   const s = createExperience();
   assert.equal(reduceExperience(s, { type: "NOPE" }), s);
   assert.equal(reduceExperience(s, { type: EVENTS.SELECT, id: "" }), s);
+});
+
+test('カード選択で即座に試着し、別の腕へ切り替えてもアクションを開始しない', () => {
+  let state = createExperience();
+  assert.equal(armDisplayMode(state), 'none');
+  for (const id of ['mk1', 'neon', 'titan']) {
+    state = reduceExperience(state, { type: EVENTS.SELECT, id });
+    assert.equal(state.previewId, id);
+    assert.equal(state.selectedId, id);
+    assert.equal(state.appliedId, null);
+    assert.equal(armDisplayMode(state), 'preview');
+  }
+});
+
+test('試着→装着→アクション→BACKで試着へ戻り、RESETで腕を消す', () => {
+  let state = reduceExperience(createExperience(), { type: EVENTS.SELECT, id: 'neon' });
+  state = reduceExperience(state, { type: EVENTS.APPLY });
+  assert.equal(armDisplayMode(state), 'none');
+  state = reduceExperience(state, { type: EVENTS.FINISH_EQUIP, requestId: state.requestId });
+  assert.equal(armDisplayMode(state), 'action');
+  state = reduceExperience(state, { type: EVENTS.BACK });
+  assert.equal(armDisplayMode(state), 'preview');
+  assert.equal(state.previewId, 'neon');
+  state = reduceExperience(state, { type: EVENTS.RESET });
+  assert.equal(armDisplayMode(state), 'none');
+  assert.equal(state.previewId, null);
 });
