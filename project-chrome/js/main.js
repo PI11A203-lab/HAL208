@@ -1265,7 +1265,7 @@ function runCapture() {
 
 /* ---------------- 仮想購入（撮影 → QR 受取） #22 ---------------- */
 import { createPurchaseFlow } from './purchase-ui.js';
-import { registerReceipt, drawQr } from './receipt-client.js';
+import { registerReceipt, cancelReceipt, newRequestId, drawQr } from './receipt-client.js';
 import { composeReceipt } from './receipt.js';
 // レシートに載せる、その時の装備（名前などの個人情報は入れない）
 function loadoutSnapshot() {
@@ -1279,7 +1279,10 @@ function loadoutSnapshot() {
 purchase = createPurchaseFlow({
   $,
   requestShot: requestPurchaseShot,
-  register: async (photo) => registerReceipt(await composeReceipt({ photo, loadout: loadoutSnapshot() })),   // 写真入りレシートを作って登録
+  // 写真入りレシートを作って登録。取り消した時は登録を止め、サーバーに届いたレシートも消す（#27 のレビュー）
+  register: async (photo, options) => registerReceipt(await composeReceipt({ photo, loadout: loadoutSnapshot() }), options),
+  unregister: cancelReceipt,
+  makeRequestId: newRequestId,
   drawQr,
   onChange: () => {
     document.body.classList.toggle("purchasing", purchase?.active ?? false);
