@@ -951,6 +951,7 @@ import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR
 
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
+let purchase = null;          // 仮想購入の画面（#22）。下の「仮想購入」で作る
 function armsShown() { return armDisplayMode(exp) !== 'none'; }
 
 function applyDesign(d) {
@@ -991,9 +992,12 @@ function syncPhaseUI() {
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+  if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
+  $("buy").hidden = !action || !!purchase?.active;
 }
 $("apply").onclick = () => {
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
+  purchase?.cancel();                         // 購入の途中なら取り消す（#22）
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
@@ -1016,6 +1020,7 @@ $("apply").onclick = () => {
 $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  purchase?.cancel(); // 購入の途中なら取り消す（#22）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   armModel.assembly = null;
   armModel.views?.forEach(view => view.setAssembly(null));
@@ -1061,6 +1066,7 @@ function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  purchase?.reset(); // 購入の途中なら取り消し、写真も捨てる（#22）
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   selected = "mk1"; renderCards(); resetJoints();
@@ -1150,16 +1156,37 @@ $("capture").onclick = () => {
   captureMsg("撮影中...");
 };
 function endCapture() { capture.finish(); $("capture").disabled = false; }
-function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+function cancelCapture() {
+  capture.cancel();
+  if (!capture.busy) {
+    $("capture").disabled = false;
+    if (purchaseShot) { purchaseShot.reject(new Error("撮影を取り消しました")); purchaseShot = null; }
+  }
+}
+// 購入用の撮影（#22）：PNG をダウンロードせずに返す。保存の撮影と同じ合成（video→eyec→gl）を使う
+let purchaseShot = null;
+function requestPurchaseShot() {
+  return new Promise((resolve, reject) => {
+    if (!capture.request()) { reject(new Error(capture.busy ? "前の撮影を処理しています。もう一度お試しください。" : "カメラの準備ができていません。")); return; }
+    purchaseShot = { resolve, reject };
+  });
+}
 // renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
 function runCapture() {
   if (!capture.take()) return;
+  const forPurchase = purchaseShot;
+  purchaseShot = null;
   try {
     composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
   } catch (e) {
     console.warn("撮影の合成に失敗:", e.message);
-    captureMsg("撮影に失敗しました");
+    if (forPurchase) forPurchase.reject(new Error("撮影に失敗しました。"));
+    else captureMsg("撮影に失敗しました");
     endCapture();
+    return;
+  }
+  if (forPurchase) {
+    canvasToPngBlob(shotCanvas).then(forPurchase.resolve, forPurchase.reject).finally(endCapture);
     return;
   }
   canvasToPngBlob(shotCanvas)
@@ -1167,6 +1194,33 @@ function runCapture() {
     .catch(e => { console.warn("PNG保存に失敗:", e.message); captureMsg("保存に失敗しました"); })
     .finally(endCapture);
 }
+
+/* ---------------- 仮想購入（撮影 → QR 受取） #22 ---------------- */
+import { createPurchaseFlow } from './purchase-ui.js';
+import { registerReceipt, drawQr } from './receipt-client.js';
+import { composeReceipt } from './receipt.js';
+// レシートに載せる、その時の装備（名前などの個人情報は入れない）
+function loadoutSnapshot() {
+  return {
+    arm: DESIGNS[exp.appliedId]?.name ?? null,
+    eyes: face.eyeMode,
+    eyeColor: face.eyeCol,
+    ears: face.ears ? $("earModel").selectedOptions[0]?.textContent.replace(/\s*\(.*\)$/, "") ?? null : null,
+  };
+}
+purchase = createPurchaseFlow({
+  $,
+  requestShot: requestPurchaseShot,
+  register: async (photo) => registerReceipt(await composeReceipt({ photo, loadout: loadoutSnapshot() })),   // 写真入りレシートを作って登録
+  drawQr,
+  onChange: () => {
+    document.body.classList.toggle("purchasing", purchase?.active ?? false);
+    syncPhaseUI();
+  },
+});
+$("buy").onclick = () => { if (exp.phase === PHASES.ACTION) purchase.buy(); };
+setInterval(() => purchase.tick(), 100);
+syncPhaseUI();
 
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
