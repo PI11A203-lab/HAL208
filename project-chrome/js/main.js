@@ -45,6 +45,7 @@ import { OneEuro } from './tracking.js';
 import { createExperience, reduceExperience, armDisplayMode, EVENTS, PHASES } from './experience.js?v=2';
 // 装着音の入口（#15）。腕のギミックの効果音（sfx.js）と名前が重ならないよう別名で読む
 import { unlockAudio as unlockEquipSound, playEquip } from './sound.js';
+import { createCameraInput } from './camera-input.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
@@ -76,24 +77,13 @@ try {
   info.textContent = "モデルを読み込めませんでした: " + e.message;
   throw e;
 }
-
-try {
-  info.textContent = "カメラの許可を待っています...";
-  video.srcObject = await navigator.mediaDevices.getUserMedia({
-    video: { width: 1280, height: 720 }, audio: false });
-  await video.play();
-} catch (e) {
-  info.textContent = "カメラにアクセスできませんでした: " + e.message;
-  throw e;
-}
-
-const W = video.videoWidth, H = video.videoHeight;
-const hairTracker = createHairTracker(vision);
-skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
-document.getElementById("camdot").className = "on";
-document.getElementById("cam").textContent = "ONLINE"; document.getElementById("cam").className = "ok";
-document.getElementById("camres").textContent = `WEBCAM (${W}×${H})`;
+
+/* ---------------- カメラ（#20） ---------------- */
+// 映像サイズは最初は仮の値。カメラが使えた時に applyVideoSize で実際の値へ合わせる（W/H を固定のまま復帰しない）
+let W = 1280, H = 720, camState = "idle";
+const hairTracker = createHairTracker(vision);
+const cam = createCameraInput({ mediaDevices: navigator.mediaDevices, video, onChange: onCameraChange });
 
 /* ---------------- three.jsシーン ---------------- */
 // 正射影カメラ：1単位＝動画の1ピクセル、y軸は上向き（そのため y = H - y_ピクセル）
@@ -1145,12 +1135,13 @@ function syncPhaseUI() {
   $("help").hidden = !action;
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
-  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING || camState !== "ready";
   renderAppearance(); // 装着状態の表示も appState と exp から描き直す
   if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
   $("buy").hidden = !action || !!purchase?.active;
 }
 $("apply").onclick = () => {
+  if (camState !== "ready") { say("カメラの準備ができてから装着してください。"); return; }
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
   purchase?.cancel();                         // 購入の途中なら取り消す（#22）
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
@@ -1321,7 +1312,7 @@ $("earCol").oninput = e => {
 import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
 const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
 const shotCtx = shotCanvas.getContext("2d");
-const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+const capture = createCaptureController({ isReady: () => camState === "ready" && W > 0 && H > 0 });
 // 体験中はパネルが隠れるため、案内はボタン自体にも短く表示する
 const CAPTURE_LABEL = $("capture").textContent;
 let captureMsgTimer = null;
@@ -1336,11 +1327,11 @@ $("capture").onclick = () => {
   $("capture").disabled = true;
   captureMsg("撮影中...");
 };
-function endCapture() { capture.finish(); $("capture").disabled = false; }
+function endCapture() { capture.finish(); $("capture").disabled = camState !== "ready"; }
 function cancelCapture() {
   capture.cancel();
   if (!capture.busy) {
-    $("capture").disabled = false;
+    $("capture").disabled = camState !== "ready";
     if (purchaseShot) { purchaseShot.reject(new Error("撮影を取り消しました")); purchaseShot = null; }
   }
 }
@@ -1357,6 +1348,12 @@ function runCapture() {
   if (!capture.take()) return;
   const forPurchase = purchaseShot;
   purchaseShot = null;
+  if (camState !== "ready") {
+    endCapture();
+    if (forPurchase) forPurchase.reject(new Error("カメラが停止したため撮影しませんでした"));
+    else captureMsg("カメラが停止したため撮影しませんでした");
+    return;
+  }
   try {
     composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
   } catch (e) {
@@ -1516,11 +1513,103 @@ function updateHandTips(now) {
   renderHandTip($("handTip"), blocked ? null : tip);
 }
 
+/* ---------------- カメラの状態に応じた処理（#20） ---------------- */
+const CAM_MESSAGES = {
+  denied: "カメラの許可がブロックされています。アドレスバーの鍵マークや設定から、このサイトのカメラを「許可」に変えてから再試行してください（再試行だけでは許可は変わりません）。",
+  notFound: "カメラが見つかりません。USBの接続を確認してから再試行してください。",
+  busy: "カメラが他のアプリで使われているか、接続が切れています。他のアプリを閉じるか接続を確認してから再試行してください。",
+  unsupported: "このカメラは要求した解像度などに対応していません。",
+  playback: "カメラの映像を再生できませんでした。再試行してください。",
+  trackEnded: "カメラの接続が切れました。接続を確認してから再試行してください。",
+  videoStopped: "カメラの映像が止まりました。接続を確認してから再試行してください。",
+  unknown: "カメラを開始できませんでした。再試行してください。",
+};
+
+// 映像サイズが決まった時に、サイズに依存するものをすべて揃える（W/H を固定のまま復帰しない）
+function applyVideoSize(w, h) {
+  W = w; H = h;
+  skelCanvas.width = W; skelCanvas.height = H;
+  eyec.width = W; eyec.height = H;
+  shotCanvas.width = W; shotCanvas.height = H;
+  renderer.setSize(W, H, false);
+  camera.right = W; camera.top = H; camera.updateProjectionMatrix();
+  bloom.setSize(W, H);
+  bodyScale = 0.2 * W;
+  hairTracker.reset();
+  resetJoints();
+  ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
+  face.lastSeen = -Infinity;
+  lastVideoTime = -1; lastFrame = null;
+  $("camres").textContent = `WEBCAM (${W}×${H})`;
+}
+
+// 切断・失敗の時に、古い表示を残さない
+function enterCameraLoss() {
+  cancelEquip();
+  cancelCapture();
+  ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  clearArmModel();
+  gadget.views?.forEach(v => v.setVisible(false));
+  resetGadgetState();
+  flames.forEach(f => f.reset());
+  ears.forEach(e => { e.g.visible = false; });
+  earController.asset?.roots.forEach(r => { r.visible = false; });
+  ectx.clearRect(0, 0, W, H);
+  skelCtx.clearRect(0, 0, W, H);
+  [0, 1, 2].forEach(i => { $("lbl" + i).style.display = "none"; });
+  $("pose").textContent = "LOST"; $("pose").className = "bad";
+  $("trk").textContent = "LOST";
+  $("pill").className = "bad";
+  $("conf").textContent = "0%"; $("confbar").style.width = "0%";
+  $("fps").textContent = "0";
+  roomEnv.suspend();
+  face.lastSeen = -Infinity;
+  // 体験中は選択へ戻す。装着中は選択へ戻す（experience.js の RESET / BACK の挙動を確認すること）
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK });
+  else if (exp.phase === PHASES.EQUIPPING) exp = reduceExperience(exp, { type: EVENTS.RESET });
+  syncPhaseUI();
+}
+
+function setCamPanel(show, text = "") {
+  $("camPanel").hidden = !show;
+  $("camMsg").textContent = text;
+  $("camRetry").disabled = camState === "starting";
+}
+
+function onCameraChange({ state, reason, width, height }) {
+  camState = state;
+  // 待機画面：カメラが使えない間は隠し（カメラの案内を見せる）、使えるようになったら待機から始め直す
+  if (state !== "ready") attractView.render("active", 1, 0, null);
+  else if (attractOn) attract.reset(performance.now() / 1000);
+  syncPhaseUI();
+  $("capture").disabled = state !== "ready";
+  if (state === "ready") {
+    applyVideoSize(width, height);
+    $("camdot").className = "on";
+    $("cam").textContent = "ONLINE"; $("cam").className = "ok";
+    roomEnv.resume();
+    setCamPanel(false);
+  } else if (state === "starting") {
+    $("camdot").className = "";
+    $("cam").textContent = "WAIT"; $("cam").className = "";
+    setCamPanel(true, "カメラを準備中です...");
+    } else if (state === "idle") {
+  // 停止（画面からは呼ばない）。案内は出さない
+  $("camdot").className = "";
+  setCamPanel(false);
+  } else {                                   // lost / error
+    enterCameraLoss();
+    $("camdot").className = "";
+    $("cam").textContent = state === "lost" ? "LOST" : "ERROR"; $("cam").className = "bad";
+    setCamPanel(true, CAM_MESSAGES[reason] ?? CAM_MESSAGES.unknown);
+  }
+}
+
 /* ---------------- メインループ ---------------- */
 let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0, lastFrame = null;
 
 function loop() {
-  if (video.currentTime !== lastVideoTime) {
+  if (camState === "ready" && video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     const t0 = performance.now();
     const result = landmarker.detectForVideo(video, t0);
@@ -1548,9 +1637,11 @@ function loop() {
     updateHud(now);
   }
   applyShake(frameDt);
-  if (roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
+  if (camState === "ready" && roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
   bloom.render(scene, camera);
   runCapture();                                               // 描画（ブルーム込み）の直後に撮影する（#11）
   requestAnimationFrame(loop);
 }
+$("camRetry").onclick = () => cam.retry();
+cam.start();
 loop();

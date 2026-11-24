@@ -30,7 +30,7 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
   // 描画先は 8bit（どのPC・ブラウザーでも描画できる形式）。小数の形式（HalfFloat）は描画できない環境があり、
   // その場合は中身が不定になって画面全体が黒くなることがあるため使わない
   const opts = { type: THREE.UnsignedByteType, depthBuffer: false };
-  const size = (k) => [Math.max(1, Math.round(width / k)), Math.max(1, Math.round(height / k))];
+  const size = (k, w = width, h = height) => [Math.max(1, Math.round(w / k)), Math.max(1, Math.round(h / k))];
   const src = new THREE.WebGLRenderTarget(...size(2), { type: THREE.UnsignedByteType });
   const levels = [4, 8].map((k) => [new THREE.WebGLRenderTarget(...size(k), opts), new THREE.WebGLRenderTarget(...size(k), opts)]);
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -79,19 +79,20 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
     const gl = renderer.getContext();
     const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
     const px = new Uint8Array(4);
-    let black = 0, total = 0;
+    let darkCount = 0, total = 0;
     for (let y = 1; y < 8; y++) {
       for (let x = 1; x < 8; x++) {
         gl.readPixels(Math.floor(w * x / 8), Math.floor(h * y / 8), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
         total++;
-        if (px[3] > 200 && Math.max(px[0], px[1], px[2]) < 16) black++;
+        if (px[3] > 200 && Math.max(px[0], px[1], px[2]) < 16) darkCount++;
       }
     }
-    if (black > total * 0.6) {
+    if (darkCount > total * 0.6) {
       usable = false;
       console.warn('ブルーム（にじみ）で画面が黒くなったため、にじみを止めました。');
     }
   }
+
 
   return {
     get strength() { return mixMat.uniforms.strength.value; },
@@ -121,6 +122,17 @@ export function createBloom(renderer, width, height, { strength = 0.75 } = {}) {
       renderer.autoClear = autoClear;
       frames++;
       if (frames === 10 || frames === 60 || frames === 300) checkScreen();
+    },
+    // 映像サイズが変わった時に呼ぶ。作り直さず描画先の大きさだけを変える
+    setSize(w, h) {
+      src.setSize(...size(2, w, h));
+      [4, 8].forEach((k, i) => {
+        const [sw, sh] = size(k, w, h);
+        levels[i][0].setSize(sw, sh);
+        levels[i][1].setSize(sw, sh);
+      });
+      usable = null;   // 次の描画で描画先を確かめ直す
+      frames = 0;      // 黒画面の確認も数え直す
     },
     dispose() {
       src.dispose();

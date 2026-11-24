@@ -60,7 +60,7 @@ test('運用ガイドの操作名・キーが実装に存在する', async () =>
     assert.match(html, new RegExp(`<em>${gesture}</em>`), `ARM CONTROL に ${gesture} がありません`);
     assert.ok(doc.includes(gesture), `ガイドに ${gesture} がありません`);
   }
-  for (const message of ['モデルを読み込めませんでした', 'カメラにアクセスできませんでした', 'カメラの準備ができていません', '装着中…']) {
+  for (const message of ['モデルを読み込めませんでした', 'カメラの許可がブロックされています', 'カメラが他のアプリで使われているか', 'カメラが見つかりません', 'カメラの準備ができていません', '装着中…']) {
     assert.ok(main.includes(message), `main.js に「${message}」がありません。ガイドを更新してください`);
     assert.ok(doc.includes(message), `ガイドに「${message}」がありません`);
   }
