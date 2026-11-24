@@ -221,3 +221,27 @@ select { background: #0d1d2b; color: #c3deec; border: 1px solid #324e64; padding
   button, summary, select, .card img, .head-cards img { transition: none; }
   .card:hover img, .head-cards button:hover img { transform: none; }
 }
+
+/* ---- タッチレス操作（#36）：指先カーソル。映像・撮影には入らない ---- */
+.hand-cursor { position: fixed; left: 0; top: 0; z-index: 1000; width: 64px; height: 64px; margin: -32px 0 0 -32px; pointer-events: none; will-change: transform; }
+.hand-cursor[hidden] { display: none; }
+.hand-cursor svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 6px #59cfffaa); }
+.hand-cursor .hc-track { fill: none; stroke: #b5edff55; stroke-width: 3; }
+.hand-cursor .hc-fill { fill: none; stroke: #7fe3ff; stroke-width: 5; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 32px 32px; }
+.hand-cursor .hc-dot { fill: #e1f6ff; }
+.hand-cursor.on-target .hc-track { stroke: #b5edffaa; }
+.hand-cursor.fired svg { animation: hc-fire .35s ease-out; }
+@keyframes hc-fire { from { transform: scale(1.35); filter: drop-shadow(0 0 16px #b5edff); } to { transform: scale(1); } }
+.hand-hover { outline: 2px solid #7fe3ff; outline-offset: 3px; box-shadow: 0 0 18px #59cfff55; }
+@media (prefers-reduced-motion: reduce) { .hand-cursor.fired svg { animation: none; } }
+/* スクロールの帯（手のカーソルが出ている時だけ、スクロールできる方向に表示） */
+.hand-scroll { position: relative; height: 0; z-index: 5; }
+.hand-scroll span { position: absolute; left: 0; right: 0; display: none; align-items: center; justify-content: center; height: 44px; color: #b5edff; font-size: 14px; letter-spacing: 2px; background: linear-gradient(#0c161ff2, #0c161f00); pointer-events: auto; }
+.hand-scroll.up span { top: 0; }
+.hand-scroll.down span { bottom: 0; background: linear-gradient(#0c161f00, #0c161ff2); }
+body.hand-pointer-on .hand-scroll.can-scroll span { display: flex; }
+.hand-scroll.hand-hover span { color: #fff; text-shadow: 0 0 10px #59cfff; }
+.hand-scroll.hand-hover { outline: none; box-shadow: none; }
+/* 体験中のメニュー切替の案内 */
+#handMenu { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 8px 16px; border: 1px solid #59cfff; background: #08141ce6; color: #cfefff; font: 12px var(--technical, monospace); letter-spacing: 1px; white-space: nowrap; }
+#handMenu[hidden] { display: none; }
