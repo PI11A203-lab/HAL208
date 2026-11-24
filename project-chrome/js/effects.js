@@ -1,20 +1,14 @@
 // 充電（腕の発光）とシールドの描画。毎フレーム資産を作らず、init時に作成して使い回す。
 import * as THREE from 'three';
 
-// 腕専用材質の発光を一時的に強める。解除で基準外観(design)へ戻す。猫耳の材質は別インスタンス。
-export function createArmGlow({ neonMat, metalMat }) {
+// 簡易腕の発光材質の強さを一時的に上げる。look は armLook() の結果（glow が基準の強さ）。猫耳の材質は別インスタンス。
+export function createArmGlow({ emissionMat }) {
   return {
-    set(strength, design) {
+    set(strength, look) {
       const s = Math.min(1, Math.max(0, strength));
-      neonMat.emissiveIntensity = design.glow * (1 + 2.5 * s);
-      metalMat.emissive.setHex(design.neon);
-      metalMat.emissiveIntensity = 0.35 * s;
+      emissionMat.emissiveIntensity = look.glow * (1 + 2.5 * s);
     },
-    restore(design) {
-      neonMat.emissiveIntensity = design.glow;
-      metalMat.emissive.setHex(0x000000);
-      metalMat.emissiveIntensity = 1;
-    },
+    restore(look) { emissionMat.emissiveIntensity = look.glow; },
   };
 }
 

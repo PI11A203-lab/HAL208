@@ -6,9 +6,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
-  createLanServer, createLocalServer, createReceiptStore, findLanAddress, isPng, resolveStatic, TOKEN_RE,
+  createLanServer, createLocalServer, createReceiptStore, findLanAddress, isPng, resolveStatic, TOKEN_RE, REQUEST_ID_RE,
 } from '../scripts/receipt-server.mjs';
-import { makeQrMatrix, registerReceipt } from '../project-chrome/js/receipt-client.js';
+import { cancelReceipt, makeQrMatrix, newRequestId, registerReceipt } from '../project-chrome/js/receipt-client.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('dummy-png-body')]);
 
@@ -194,4 +194,85 @@ test('同梱した QR ライブラリにライセンスと出どころが付い�
   assert.match(await readFile(new URL('LICENSE', dir), 'utf8'), /MIT License[\s\S]*Kazuhiko Arase/);
   assert.match(await readFile(new URL('README.md', dir), 'utf8'), /qrcode-generator.*2\.0\.4/);
   assert.match(await readFile(new URL('qrcode.mjs', dir), 'utf8'), /Licensed under the MIT license/);
+});
+
+/* ---- 購入の取り消し（#27 のレビュー）：登録番号でサーバーのレシートを消す ---- */
+const RID = 'req_abcdefghijklmnop';
+const del = (url, headers = {}) => fetch(url, { method: 'DELETE', headers: { 'X-Receipt-Request': RID, ...headers } });
+
+test('取り消し：登録済みのレシートを消し、スマホからも開けなくなる', async (t) => {
+  const s = await setup(t);
+  const res = await post(`${s.local}/api/receipts`, PNG, { Origin: s.local, 'X-Receipt-Request': RID });
+  assert.equal(res.status, 201);
+  const token = (await res.json()).url.split('/r/')[1];
+  assert.equal((await fetch(`${s.lan}/r/${token}`)).status, 200);
+  assert.equal((await del(`${s.local}/api/receipts`, { Origin: s.local })).status, 204);
+  assert.equal((await fetch(`${s.lan}/r/${token}`)).status, 404);
+  assert.equal((await fetch(`${s.lan}/r/${token}/receipt.png`)).status, 404);
+  assert.equal(s.store.size, 0);
+});
+
+test('取り消し：登録より先に取り消しが届いたら、後から届いた登録は保存しない', async (t) => {
+  const s = await setup(t);
+  assert.equal((await del(`${s.local}/api/receipts`)).status, 204);
+  const res = await post(`${s.local}/api/receipts`, PNG, { 'X-Receipt-Request': RID });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).error, /取り消/);
+  assert.equal(s.store.size, 0);
+  // 別の登録番号の登録はそのまま受け付ける
+  assert.equal((await post(`${s.local}/api/receipts`, PNG, { 'X-Receipt-Request': 'other_request_123456' })).status, 201);
+});
+
+test('取り消し：他のサイトから・番号なし・不正な番号は受け付けない', async (t) => {
+  const s = await setup(t);
+  s.store.add(PNG, { requestId: RID });
+  assert.equal((await del(`${s.local}/api/receipts`, { Origin: 'https://evil.example' })).status, 403);
+  assert.equal((await fetch(`${s.local}/api/receipts`, { method: 'DELETE' })).status, 400);
+  assert.equal((await del(`${s.local}/api/receipts`, { 'X-Receipt-Request': '../bad id' })).status, 400);
+  assert.equal((await post(`${s.local}/api/receipts`, PNG, { 'X-Receipt-Request': 'short' })).status, 400);
+  assert.equal((await fetch(`${s.lan}/api/receipts`, { method: 'DELETE', headers: { 'X-Receipt-Request': RID } })).status, 405);
+  assert.equal(s.store.size, 1);
+});
+
+test('取り消しの記録も有効期限で消え、増え続けない', () => {
+  let now = 0;
+  const store = createReceiptStore({ ttlMs: 100, maxItems: 2, now: () => now });
+  assert.equal(store.cancelRequest('bad'), 0);
+  for (let i = 0; i < 20; i++) store.cancelRequest(`request_${String(i).padStart(12, '0')}`);
+  assert.equal(store.add(PNG, { requestId: 'request_000000000019' }), null);
+  now = 100;
+  assert.ok(store.add(PNG, { requestId: 'request_000000000019' }));   // 期限後は同じ番号でも保存できる
+  assert.ok(store.add(PNG));                                         // 番号なしの登録も今まで通り
+});
+
+test('受取の登録：登録番号を付けて送り、途中で止めると AbortError になる', async () => {
+  const id = newRequestId();
+  assert.match(id, REQUEST_ID_RE);
+  assert.notEqual(id, newRequestId());
+  let seen;
+  await registerReceipt(new Blob([PNG]), {
+    requestId: id,
+    fetchImpl: async (url, opt) => { seen = opt; return Response.json({ url: 'http://x/r/t' }, { status: 201 }); },
+  });
+  assert.equal(seen.headers['X-Receipt-Request'], id);
+  const controller = new AbortController();
+  const pending = registerReceipt(new Blob([PNG]), {
+    signal: controller.signal,
+    fetchImpl: (url, opt) => new Promise((resolve, reject) => {
+      opt.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }),
+  });
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+});
+
+test('取り消しの送信：DELETE と登録番号を送り、失敗しても例外にしない', async () => {
+  let seen;
+  assert.equal(await cancelReceipt('req_abcdefghijklmnop', {
+    fetchImpl: async (url, opt) => { seen = { url, ...opt }; return new Response(null, { status: 204 }); },
+  }), true);
+  assert.equal(seen.method, 'DELETE');
+  assert.equal(seen.headers['X-Receipt-Request'], 'req_abcdefghijklmnop');
+  assert.equal(await cancelReceipt('req_abcdefghijklmnop', { fetchImpl: async () => { throw new TypeError('offline'); } }), false);
+  assert.equal(await cancelReceipt(null), false);
 });
