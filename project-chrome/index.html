@@ -56,7 +56,9 @@
         <div data-gs="spider"><span>🤟</span>人差し指と小指を立てる<em>NET</em></div>
         <div data-gs="pistol"><span>👉</span>人差し指を横に向け親指を立てる<em>HOOK</em></div>
         <div data-gs="fist"><span>👊</span>拳で腕を勢いよく伸ばす<em>FIST</em></div>
+        <div data-gs="menu"><span>🙌</span>両手を上げて1秒 → 指でボタン操作<em>MENU</em></div>
       </div>
+      <div id="handMenu" hidden></div>
       <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
     </div>
     <div id="actionBar">
@@ -112,7 +114,6 @@
         <svg id="atBones" class="at-bones" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div id="atDots" class="at-dots" aria-hidden="true"></div>
       </div>
-      <div class="at-spot" aria-hidden="true"><span>STAND HERE</span></div>
       <div id="atPrompt" class="at-prompt" role="status"></div>
     </div>
     <div id="staffConfirm" hidden>
@@ -152,6 +153,7 @@
       <div class="at-count"><span id="atCount"></span><span>VIRTUAL STORE / 実際の決済は発生しません</span></div>
       <div id="atStrip" class="at-strip"></div>
     </div>
+    <div class="hand-scroll up" data-hand-scroll="up" data-hand-scroll-target="#panel .selection-scroll" aria-hidden="true"><span>▲</span></div>
     <div class="selection-scroll">
     <section id="sec-arms">
       <h3>ARMS <em>// SELECT UPGRADE</em></h3>
@@ -217,6 +219,7 @@
       <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
     </section>
     </div>
+    <div class="hand-scroll down" data-hand-scroll="down" data-hand-scroll-target="#panel .selection-scroll" aria-hidden="true"><span>▼</span></div>
     <div id="btns">
       <button id="apply"><span>装着して体験する<small>INSTALL MODIFICATION</small></span><b aria-hidden="true">↗</b></button>
       <button id="reset"><span aria-hidden="true">↺</span> RESET</button>

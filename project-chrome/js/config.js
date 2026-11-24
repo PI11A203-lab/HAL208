@@ -132,6 +132,20 @@ export const ATTRACT_MODE = {
   cycleSec: 4,          // ショーケースの商品を切り替える間隔
 };
 
+// タッチレス操作（#36）：腕を上げて人差し指で指すとカーソルが出て、ボタンの上で止めると選ぶ。
+// box は肩幅を 1 とした操作範囲（指す側の肩が中心）。その他の値の意味は hand-pointer.js の HAND_POINTER_DEFAULTS
+export const HAND_POINTER = {
+  enabled: true,
+  dwellSec: 1.0,
+  cooldownSec: 0.6,
+  minCutoff: 1.0,
+  beta: 4,
+  box: { halfWidth: 1.1, top: 1.5, bottom: 0.3, outward: 0.15 },
+  menuHoldSec: 1.0,    // 体験中：両手をこの時間上げるとメニュー（カーソル）とギミックを切り替える
+  menuIdleSec: 6,      // メニュー中にカーソルをこの時間使わなければギミックへ戻る
+  scrollSpeed: 520,    // ▲▼の帯の上でのスクロールの速さ（px／秒）
+};
+
 // 効果音（assets/sfx/。make-sfx.py で合成したオリジナル）。volume：全体の音量、gain：音ごとの音量の補正
 export const SFX = {
   dir: "./assets/sfx/",

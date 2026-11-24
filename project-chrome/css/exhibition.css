@@ -228,7 +228,7 @@ body.attract #video { filter: brightness(.38) saturate(.6); transition: filter .
 #attract { position: absolute; inset: 0; z-index: 6; overflow: hidden; pointer-events: none; background: linear-gradient(#0a2a3a40, #04121b80); transition: opacity .5s; }
 #attract[hidden] { display: none; }
 #attract[data-state="welcome"] { background: transparent; }
-#attract[data-state="welcome"] .at-grid, #attract[data-state="welcome"] .at-scan, #attract[data-state="welcome"] .at-figure, #attract[data-state="welcome"] .at-spot { display: none; }
+#attract[data-state="welcome"] .at-grid, #attract[data-state="welcome"] .at-scan, #attract[data-state="welcome"] .at-figure { display: none; }
 .at-grid { position: absolute; inset: 0; background-image: linear-gradient(#59cfff10 1px, transparent 1px), linear-gradient(90deg, #59cfff10 1px, transparent 1px); background-size: 48px 48px; }
 .at-scan { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, transparent, #7fe3ff, transparent); box-shadow: 0 0 18px 4px #59cfff55; animation: at-scan 3s linear infinite; }
 .at-scan::after { content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 80px; background: linear-gradient(#59cfff00, #59cfff12); }
@@ -259,10 +259,6 @@ body.attract #video { filter: brightness(.38) saturate(.6); transition: filter .
 .at-dots { position: absolute; inset: 0; }
 .at-dots i { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #ffd54f; box-shadow: 0 0 10px #ffd54f; }
 .at-dots i[hidden] { display: none; }
-.at-spot { position: absolute; left: 50%; bottom: 4%; width: 30%; height: 7%; transform: translateX(-50%); border-radius: 50%; border: 2px solid #7fe3ff; box-shadow: 0 0 22px #59cfff88, inset 0 0 18px #59cfff55; animation: at-pulse 2s ease-in-out infinite; }
-.at-spot span { position: absolute; left: calc(100% + 14px); top: 50%; transform: translateY(-50%); font: 11px var(--technical); color: #7fe3ff; letter-spacing: 3px; white-space: nowrap; }
-@keyframes at-pulse { 50% { box-shadow: 0 0 34px #59cfffcc, inset 0 0 24px #59cfff88; } }
-#attract[data-state="scanning"] .at-spot { border-color: #ffd54f; box-shadow: 0 0 22px #ffd54f88, inset 0 0 18px #ffd54f55; }
 /* 右：ショーケース（待機中はストアの代わりに表示） */
 body.attract #panel > :not(#attractShow) { display: none; }
 body.attract #actionBar, body.attract #gesturebox, body.attract #chargebox { display: none; }
@@ -280,4 +276,27 @@ body.attract #actionBar, body.attract #gesturebox, body.attract #chargebox { dis
 .at-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(28px, 1fr)); gap: 5px; margin-top: 8px; }
 .at-strip div { aspect-ratio: 1; border: 1px solid #2a3e4b; background: #0c1822 center / contain no-repeat; opacity: .5; transition: opacity .3s, border-color .3s; }
 .at-strip div.on { opacity: 1; border-color: #7fe3ff; box-shadow: 0 0 10px #59cfff55; }
-@media (prefers-reduced-motion: reduce) { .at-scan, .at-spot, .at-ring, .at-show img.kb { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .at-scan, .at-ring, .at-show img.kb { animation: none; } }
+/* ---- タッチレス操作（#36）：指先カーソル。映像・撮影には入らない ---- */
+.hand-cursor { position: fixed; left: 0; top: 0; z-index: 1000; width: 64px; height: 64px; margin: -32px 0 0 -32px; pointer-events: none; will-change: transform; }
+.hand-cursor[hidden] { display: none; }
+.hand-cursor svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 6px #59cfffaa); }
+.hand-cursor .hc-track { fill: none; stroke: #b5edff55; stroke-width: 3; }
+.hand-cursor .hc-fill { fill: none; stroke: #7fe3ff; stroke-width: 5; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 32px 32px; }
+.hand-cursor .hc-dot { fill: #e1f6ff; }
+.hand-cursor.on-target .hc-track { stroke: #b5edffaa; }
+.hand-cursor.fired svg { animation: hc-fire .35s ease-out; }
+@keyframes hc-fire { from { transform: scale(1.35); filter: drop-shadow(0 0 16px #b5edff); } to { transform: scale(1); } }
+.hand-hover { outline: 2px solid #7fe3ff; outline-offset: 3px; box-shadow: 0 0 18px #59cfff55; }
+@media (prefers-reduced-motion: reduce) { .hand-cursor.fired svg { animation: none; } }
+/* スクロールの帯（手のカーソルが出ている時だけ、スクロールできる方向に表示） */
+.hand-scroll { position: relative; height: 0; z-index: 5; }
+.hand-scroll span { position: absolute; left: 0; right: 0; display: none; align-items: center; justify-content: center; height: 44px; color: #b5edff; font-size: 14px; letter-spacing: 2px; background: linear-gradient(#0c161ff2, #0c161f00); pointer-events: auto; }
+.hand-scroll.up span { top: 0; }
+.hand-scroll.down span { bottom: 0; background: linear-gradient(#0c161f00, #0c161ff2); }
+body.hand-pointer-on .hand-scroll.can-scroll span { display: flex; }
+.hand-scroll.hand-hover span { color: #fff; text-shadow: 0 0 10px #59cfff; }
+.hand-scroll.hand-hover { outline: none; box-shadow: none; }
+/* 体験中のメニュー切替の案内 */
+#handMenu { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 8px 16px; border: 1px solid #59cfff; background: #08141ce6; color: #cfefff; font: 12px var(--technical, monospace); letter-spacing: 1px; white-space: nowrap; }
+#handMenu[hidden] { display: none; }
