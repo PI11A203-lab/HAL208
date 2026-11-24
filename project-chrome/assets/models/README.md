@@ -3,13 +3,17 @@
 Issue #7 で追加した展示用の腕モデルの置き場所と、モデルとプログラムの間の決まりです。
 新しい腕モデルを作るときも、この規格に合わせると `js/arms.js` の読込処理をそのまま使えます。
 
+現在の3種はマスク・耳に合わせたサテン塗装。NEON EDGEには重ね装甲・丸いセンサーと赤いLEDを追加した。
+MK-IとNEONの指は幅・厚みを拡大している。
+編集・再実行・検証は[腕のサテン仕上げ](../../../docs/arm-satin-finish.md)を参照。
+
 ## ファイル一覧
 
 | ファイル | 内容 | 容量 | 使う装備 |
 |---|---|---|---|
-| `arm-mk1.glb` | 筋肉の形に沿ったクローム装甲と露出した油圧機構を持つ5本指の義手（基準モデル、右腕） | 約1.5 MB（1,538,204 bytes）、約64,000三角形 | MK-I（`config.js` の `DESIGNS.mk1.model`） |
-| `arm-neon.glb` | 細身で角のある黒いクロームの装甲、板の縁に沿った発光ライン、鋭い指先（右腕） | 約0.6 MB（609,716 bytes）、約20,000三角形 | NEON EDGE（`DESIGNS.neon.model`） |
-| `arm-titan.glb` | 厚い装甲ブロック、外側の支持フレーム、大型ピストン、歯車状の肘、太い指の作業用ハンド（右腕） | 約1.1 MB（1,126,092 bytes）、約44,600三角形 | TITAN FRAME（`DESIGNS.titan.model`） |
+| `arm-mk1.glb` | サテン塗装の装甲と露出した油圧機構を持つ5本指の義手（基準モデル、右腕） | 1,588,692 bytes | MK-I（`config.js` の `DESIGNS.mk1.model`） |
+| `arm-neon.glb` | 黒の重ね装甲、丸いセンサー、赤い発光スリット、厚みのある指（右腕） | 約1.1 MB | NEON EDGE（`DESIGNS.neon.model`） |
+| `arm-titan.glb` | サテン塗装の厚い装甲、支持フレーム、大型ピストン、歯車状の肘と作業用ハンド（右腕） | 1,145,084 bytes | TITAN FRAME（`DESIGNS.titan.model`） |
 
 ## ノード（部品）
 
@@ -236,3 +240,23 @@ PROTOTYPE 04は最初のON時に読込。OFF/RESET中に完了した旧request�
 ## LEDウサギ耳
 `ears-rabbit-led.blend` / `ears-rabbit-led.glb`は#25の内周LED付きウサギ耳。
 制作・材質・実際のくぼみ寸法・再生成・操作は[LEDウサギ耳](../../../docs/rabbit-led-ears.md)を参照。
+
+## 機械式ハーフマスク（制作中）
+`mask-prototype-04.blend` / `mask-prototype-04.glb`は#30の曲面装甲マスク。
+MASKメニューのON/OFFから顔追従で試着できる。実カメラの装着精度は確認待ち。
+編集・軸・再生成・検証は[制作ガイド](../../../docs/mechanical-half-mask.md)を参照。
+
+## RABBIT 04 顔マスク
+
+`mask-rabbit-04.blend` / `mask-rabbit-04.glb`はアイボリの頬・前歯とピンクLEDを持つウサギ顔マスク。
+既存のウサギ耳とは別モデルで、MASKの`RABBIT 04 / ウサギ`から選択する。
+部品編集・生成・検証は[ウサギ顔マスク制作ガイド](../../../docs/rabbit-face-mask.md)を参照。
+
+## ONI 04 鬼面
+`mask-oni-04.blend` / `mask-oni-04.glb`は立体の牙・鼻孔・六角金網・赤色発光部を備える別モデル。
+MASKのモデル選択から切り替え可能。編集・比率・検証は[ONI制作ガイド](../../../docs/oni-mask.md)を参照。
+
+`mask-oni-04-refined.blend`は、ユーザー指定で既存原本を開いて別名保存した装甲・牙の改修版。
+4方向の確認・再実行は[改修ガイド](../../../docs/oni-refined-model.md)を参照。
+WebのONI 04は頬・ラグを広げて反射を調整した`mask-oni-04-fit.glb`を使用する。
+編集原本は`mask-oni-04-fit.blend`。旧版の原本・GLBは保管している。

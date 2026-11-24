@@ -6,7 +6,7 @@
 <title>Project Chrome</title>
 <!-- Project Chrome 試作版（フェーズ5）：Webカメラで体を追跡し、サイバネティックな腕・猫耳・目のエフェクトを重ねて表示します。映像はこのPC内だけで処理されます。 -->
 <link rel="stylesheet" href="./css/style.css">
-<link rel="stylesheet" href="./css/exhibition.css">
+<link rel="stylesheet" href="./css/exhibition.css?v=33-develop-merge">
 
 <script type="importmap">
 { "imports": {
@@ -116,14 +116,19 @@
     <div class="store-caption"><span><i></i> PARTS TERMINAL</span><span>COLLECTION / 01</span></div>
     <h2>CHOOSE YOUR<br><strong>NEXT SELF.</strong><span class="heading-cross" aria-hidden="true">+</span></h2>
     <p class="store-help">パーツを選ぶと、映像で試着できます。</p>
-    <div id="tabs">
-      <button class="tab sel" data-t="arms" aria-pressed="true"><small>01</small> ARMS</button>
-      <button class="tab" data-t="eyes" aria-pressed="false"><small>02</small> EYES</button>
-      <button class="tab" data-t="head" aria-pressed="false"><small>03</small> HEAD</button>
+    <div class="category-nav" aria-label="装備カテゴリー">
+      <button id="categoryPrev" aria-label="前のカテゴリー" disabled>‹</button>
+    <div id="tabs" role="tablist" aria-label="装備カテゴリー">
+      <button class="tab sel" data-t="arms" role="tab" id="tab-arms" aria-controls="sec-arms" aria-selected="true"><small>01</small> ARMS</button>
+      <button class="tab" data-t="eyes" role="tab" id="tab-eyes" aria-controls="sec-eyes" aria-selected="false" tabindex="-1"><small>02</small> EYES</button>
+      <button class="tab" data-t="mask" role="tab" id="tab-mask" aria-controls="sec-mask" aria-selected="false" tabindex="-1"><small>03</small> MASK</button>
+      <button class="tab" data-t="head" role="tab" id="tab-head" aria-controls="sec-head" aria-selected="false" tabindex="-1"><small>04</small> HEAD</button>
       <div class="tab locked" data-n="HAIR">HAIR<small>SOON</small></div>
       <div class="tab locked" data-n="LEGS">LEGS<small>SOON</small></div>
       <div class="tab locked" data-n="BACK">BACK<small>SOON</small></div>
       <div class="tab locked" data-n="SPINE">SPINE<small>SOON</small></div>
+    </div>
+      <button id="categoryNext" aria-label="次のカテゴリー">›</button>
     </div>
     <div class="selection-scroll">
     <section id="sec-arms">
@@ -146,6 +151,21 @@
       <label>Custom color <input type="color" id="eyeCol" value="#00e5ff"></label>
       <label>Opacity <input type="range" id="eyeOp" min="0.2" max="1" step="0.05" value="0.85"></label>
       <p class="note">LENS：虹彩の模様と瞳孔を残したまま色だけを変えます（カラーコンタクト風）。CYBER：機械式の発光アイ。カメラに近いほど精度が上がります。</p>
+    </section>
+    <section id="sec-mask" role="tabpanel" aria-labelledby="tab-mask" hidden>
+      <h3>MASK <em>// FACIAL ARMOR</em></h3>
+      <div id="maskCards" class="head-cards mask-cards" role="group" aria-label="マスクを選択">
+        <button type="button" data-mask="prototype" aria-pressed="false"><img src="./assets/shop/mask-prototype.png" alt="機械式ハーフマスク"><span>PROTOTYPE 04</span></button>
+        <button type="button" data-mask="oni" aria-pressed="false"><img src="./assets/shop/mask-oni.png" alt="赤いLEDと牙のある鬼面"><span>ONI 04 / 鬼面</span></button>
+        <button type="button" data-mask="rabbit" aria-pressed="false"><img src="./assets/shop/mask-rabbit.png" alt="白い外装のウサギマスク"><span>RABBIT 04 / ウサギ</span></button>
+      </div>
+      <label>マスクを装着 <input type="checkbox" id="maskOn"></label>
+      <p class="note" id="maskStatus" role="status">ONにすると機械式ハーフマスクを試着できます。</p>
+      <label>Armor color <input type="color" id="maskCol" value="#35383b"></label>
+      <label>サイズ <input type="range" id="maskSize" min="0.8" max="1.3" step="0.01" value="1"></label>
+      <label>高さ（＋で上）<input type="range" id="maskLift" min="-0.2" max="0.2" step="0.01" value="-0.05"></label>
+      <label>奥行き（＋で手前）<input type="range" id="maskDepth" min="-0.15" max="0.2" step="0.01" value="0"></label>
+      <p class="note">鼻と顎、左右の頬に合わせて追従します。顔を正面に向けてONにし、必要なら位置を調整してください。目・耳・腕と一緒に使えます。</p>
     </section>
     <section id="sec-head" hidden>
       <h3>HEAD <em>// IMPLANTS</em></h3>
@@ -186,6 +206,6 @@
 
 <script type="module" src="./js/intro.js"></script>
 <script type="module" src="./js/collection.js"></script>
-<script type="module" src="./js/main.js?v=28-2"></script>
+<script type="module" src="./js/main.js?v=33-develop-merge"></script>
 </body>
 </html>

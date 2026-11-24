@@ -172,11 +172,18 @@ export function createArmView(template, model, { mirror = false } = {}) {
     // design：config.js の DESIGNS の1件（色・粗さ・発光）
     applyAppearance(design) {
       const shell = materials.get('shell'), joint = materials.get('joint'), emission = materials.get('emission');
-      if (shell) { shell.color.setHex(design.metal); shell.roughness = design.rough; }
+      if (shell) {
+        shell.color.setHex(design.metal); shell.roughness = design.rough;
+        shell.envMapIntensity = design.envIntensity ?? 1;
+      }
       if (joint) joint.color.setHex(design.joint);
       if (emission) {
         emission.color.setHex(design.neon);
         emission.emissive.setHex(design.neon);
+        if (design.ledLinear) {
+          emission.color.setRGB(...design.ledLinear, THREE.LinearSRGBColorSpace);
+          emission.emissive.setRGB(...design.ledLinear, THREE.LinearSRGBColorSpace);
+        }
         emission.emissiveIntensity = design.glow;
       }
     },
