@@ -23,9 +23,8 @@ import { createLoadoutMenu } from './loadout-menu.js';
 import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=33-develop-merge';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
-import { HAND_CONFIG, EFFECTS, createGestureTracker, selectHand } from './gestures.js';
-import { createHandInput } from './hand-input.js';
 import { createArmGlow, createShield } from './effects.js';
+import { createShieldController } from './gadget-logic.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -92,7 +91,6 @@ try {
 
 const W = video.videoWidth, H = video.videoHeight;
 const hairTracker = createHairTracker(vision);
-const handInput = createHandInput({ HandLandmarker, vision, W, H }); // 手モデルはアクション開始時に非同期で読み込む
 skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
 document.getElementById("camdot").className = "on";
@@ -457,7 +455,7 @@ const gadget = { kind: "off", views: null, requests: createRequestTracker(),
                  shots: ARMS.map(() => null), aimDir: ARMS.map(() => [0, 1, 0]), curDir: ARMS.map(() => [0, 1, 0]),
                  foreLen: ARMS.map(() => 100),
                  triggers: ARMS.map(() => createGestureTrigger({ hold: 0.2 })), punches: ARMS.map(() => createPunchDetector()),
-                 labels: ARMS.map(() => null) };
+                 labels: ARMS.map(() => null), forceUntil: 0 };
 // 待機中に表示する装置の形（AUTO の時は射出装置）
 const idleKind = () => (gadget.kind === "auto" ? "plasma" : gadget.kind);
 const flames = ARMS.map(() => { const f = createFlame(); scene.add(f.object); return f; });
@@ -579,12 +577,12 @@ function updateGadget(arm, s, now) {
   gadget.foreLen[i] = Math.max(d.length(), 1);
   gadget.curDir[i] = d.normalize().toArray();
   const [ps, pe, pw] = arm.ids.map(id => joints[id].p);
-  const aiming = isAimPose(ps, pe, pw);
+  const aiming = isAimPose(ps, pe, pw) || now < gadget.forceUntil;   // forceUntil：CHARGEボタン
   if (aiming) gadget.aimDir[i] = gadget.curDir[i];
   const pts = s.hand?.points;
   let ev;
   if (gadget.kind === "auto") {
-    const charging = autoGestures(i, pts, elbowAngle(ps, pe, pw), aiming, now);
+    const charging = autoGestures(i, pts, elbowAngle(ps, pe, pw), aiming, now) || now < gadget.forceUntil;
     ev = ctrl.update(now, { aiming: charging });
   } else {
     ev = ctrl.update(now, { aiming, fist: pts ? isFist(pts) : false, open: pts ? isOpenHand(pts) : false, tracked: Boolean(pts) });
@@ -668,7 +666,7 @@ function updateArm(arm, now) {
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
   view?.setVisible(show);
-  if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
+  if (!show) { dropShield(ARMS.indexOf(arm)); updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   // 非有限座標なら描画をスキップ（契約：異常点でモデルを跳ばさない）。
@@ -685,6 +683,7 @@ function updateArm(arm, now) {
   updateHandLabel(ARMS.indexOf(arm), hand?.points ?? null);
   const handOffset = updateGadget(arm, { el, wr, thickness: foreR, hand }, now);
   updateFlame(arm, hand, now);
+  updateShield(arm, el, wr, Boolean(hand), now);
 
   if (view) {
     const [a, b, c] = [sh, el, wr].map(v => v.toArray());
@@ -1000,84 +999,59 @@ function updateFace(now) {
   });
 }
 
-/* ---------------- 手のジェスチャー（#9：拳=充電、開く=シールド） ---------------- */
-const gestures = createGestureTracker();
+/* ---------------- シールドと充電の発光（#9） ---------------- */
+// 手の認識・充電（PLASMAの溜め）は上の腕のギミックの仕組みを使う。
+// ・シールド：腕を構えていない状態で開いた手を保持、またはSHIELDボタン（createShieldController）
+// ・充電の発光：PLASMAの溜め（charge）に連動して腕の発光を強め、解除で基準の外観へ戻す
 const armGlow = createArmGlow({ neonMat, metalMat });
-const shield = createShield(scene);
-let handSample = null, handAt = -Infinity, handArm = -1, handMs = 0, gestureFx = EFFECTS.NONE;
-const GESTURE_LABEL = { charging: "CHARGING", shield: "SHIELD" };
+const shields = ARMS.map(() => createShieldController());
+const shieldViews = ARMS.map(() => createShield(scene));
+let boostOn = false;
 
-// 効果と判定状態を止めて基準外観へ戻す（phase変更・BACK・RESET・認識喪失で共通）
+function updateShield(arm, el, wr, hasHand, now) {
+  const i = ARMS.indexOf(arm);
+  const [ps, pe, pw] = arm.ids.map(id => joints[id].p);
+  const want = armDisplayMode(exp) === 'action' && hasHand && currentLabel[i] === "open" && !isAimPose(ps, pe, pw);
+  const r = shields[i].update(now, want);
+  if (!r.on) { shieldViews[i].hide(); return; }
+  const fd = new THREE.Vector3().subVectors(wr, el).normalize();
+  shieldViews[i].update(wr.clone().addScaledVector(fd, bodyScale * 0.35), bodyScale * 0.5, r.strength, design.neon, now);
+}
+function dropShield(i) { shields[i].reset(); shieldViews[i].hide(); }
+
+function restoreArmGlow() {
+  boostOn = false;
+  armGlow.restore(design); armModel.views?.forEach(v => v.applyAppearance(design));
+}
+function updateArmGlow() {
+  const c = Math.max(0, ...gadget.ctrls.filter(x => x.mode === "charging").map(x => x.charge));
+  if (c > 0) {
+    boostOn = true;
+    armGlow.set(c, design); armModel.views?.forEach(v => v.setBoost(c, design));
+  } else if (boostOn) restoreArmGlow();
+}
+
+// 効果を止めて基準外観へ戻す（phase変更・BACK・RESETで共通）
 function stopGesture() {
-  gestures.reset();
-  handSample = null; handArm = -1;
-  shield.hide(); armGlow.restore(design); gestureFx = EFFECTS.NONE;
-  renderGestureHud({ state: "none", gesture: "none", progress: 0, effect: EFFECTS.NONE });
+  ARMS.forEach((_, i) => dropShield(i));
+  gadget.forceUntil = 0;
+  if (boostOn) restoreArmGlow();
 }
 
-function renderGestureHud(r) {
-  const el = document.getElementById("gState");
-  if (!el) return;
-  let t;
-  if (r.effect !== EFFECTS.NONE) t = GESTURE_LABEL[r.effect] + (r.source === "button" ? " (BUTTON)" : "");
-  else if (handInput.status === "loading") t = "HAND MODEL LOADING…";
-  else if (handInput.status === "failed") t = "HAND OFF：ボタンで操作";
-  else if (r.state === "candidate") t = "HOLD… " + r.gesture.toUpperCase();
-  else if (r.state === "cooldown") t = "COOLDOWN";
-  else if (handInput.status !== "ready") t = "-";
-  else t = handSample ? (r.gesture === "unknown" ? "POSE ?" : r.gesture.toUpperCase()) : "NO HAND";
-  if (el.textContent !== t) el.textContent = t;
-  document.getElementById("gBar").style.width = Math.round(r.progress * 100) + "%";
+// ボタン：手の判定と同じ制御を通す
+function triggerCharge() {
+  const now = performance.now() / 1000;
+  if (armDisplayMode(exp) !== 'action') return;
+  if (gadget.kind === "off") { say("GADGET で種類を選んでください。"); return; }
+  if (!ARMS.some(a => a.state !== "lost")) { say("腕が映ると使えます。"); return; }
+  gadget.forceUntil = now + 1.2;   // 構えたものとして溜め、満タンか期限で発射する
 }
-
-function updateGesture(now, nowMs) {
-  const armOn = ARMS.some(a => a.state !== "lost");
-  if (exp.phase !== PHASES.ACTION) { if (gestureFx !== EFFECTS.NONE || handSample) stopGesture(); return; }
-
-  // 手の認識は腕が追跡されている間だけ。ボタン由来の効果は腕がなくても続ける。
-  if (!armOn) handSample = null;
-  if (armOn && handInput.status === "ready") {
-    const t1 = performance.now();
-    const hands = handInput.detect(video, nowMs);
-    if (hands) {
-      handMs = handMs * 0.8 + (performance.now() - t1) * 0.2;
-      const wrists = ARMS.map(a => { const j = joints[a.ids[2]]; return now - j.lastSeen < 0.3 ? { x: j.raw.x, y: j.raw.y } : null; });
-      handSample = selectHand(hands, wrists, bodyScale);
-      handArm = -1;
-      if (handSample) {
-        let best = Infinity;
-        wrists.forEach((w, k) => { if (!w) return; const d = Math.hypot(handSample.points[0].x - w.x, handSample.points[0].y - w.y); if (d < best) { best = d; handArm = k; } });
-      }
-      handAt = nowMs;
-    }
-  }
-  const fresh = handSample && nowMs - handAt <= HAND_CONFIG.staleMs ? handSample : null;
-  const r = gestures.update(fresh, nowMs, true);
-  if (!fresh && r.source !== "button") handArm = -1;
-
-  if (r.effect === EFFECTS.CHARGING) { armGlow.set(r.strength, design); gestureFx = r.effect; }
-  else if (gestureFx === EFFECTS.CHARGING) armGlow.restore(design);
-
-  if (r.effect === EFFECTS.SHIELD) {
-    const arm = handArm >= 0 && ARMS[handArm].state !== "lost" ? ARMS[handArm] : ARMS.find(a => a.state !== "lost");
-    let center = new THREE.Vector3(W / 2, H / 2, 0); // 腕が映っていない時のボタン操作は画面中央へ
-    if (arm) {
-      const [, el, wr] = arm.ids.map(i => conv(joints[i].p));
-      const fd = new THREE.Vector3().subVectors(wr, el).normalize();
-      center = wr.clone().addScaledVector(fd, bodyScale * 0.35);
-    }
-    shield.update(center, bodyScale * 0.5, r.strength, design.neon, now);
-    gestureFx = r.effect;
-  } else shield.hide();
-  if (r.effect === EFFECTS.NONE) gestureFx = EFFECTS.NONE;
-  renderGestureHud(r);
-}
-
-function triggerGesture(effect) { // ボタン：手の判定と同じ状態機械を通す
-  const enabled = exp.phase === PHASES.ACTION;
-  const r = gestures.force(effect, performance.now(), enabled);
-  if (!r) say("少し待ってからもう一度押してください。");
-  else if (effect === EFFECTS.CHARGING && !ARMS.some(a => a.state !== "lost")) say("腕が映ると発光が見えます。");
+function triggerShield() {
+  const now = performance.now() / 1000;
+  if (armDisplayMode(exp) !== 'action') return;
+  const live = ARMS.filter(a => a.state !== "lost");
+  if (!live.length) { say("腕が映ると使えます。"); return; }
+  if (!live.map(a => shields[ARMS.indexOf(a)].force(now)).some(Boolean)) say("少し待ってからもう一度押してください。");
 }
 
 /* ---------------- デザインとUI ---------------- */
@@ -1128,7 +1102,6 @@ function syncPhaseUI() {
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
   $("gCharge").hidden = !action; $("gShield").hidden = !action;
-  if (action && handInput.status === "idle") handInput.init().then(() => { if (handInput.status === "failed") say("手の認識を開始できません。ボタンで操作できます。"); });
   if (!action) stopGesture();
   if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
   $("buy").hidden = !action || !!purchase?.active;
@@ -1168,8 +1141,8 @@ $("back").onclick = () => {
   syncPhaseUI();
   say("装備選択に戻りました。");
 };
-$("gCharge").onclick = () => triggerGesture(EFFECTS.CHARGING);
-$("gShield").onclick = () => triggerGesture(EFFECTS.SHIELD);
+$("gCharge").onclick = triggerCharge;
+$("gShield").onclick = triggerShield;
 $("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
 let staffOpen = false;
 function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
@@ -1385,7 +1358,6 @@ function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
   $("conf").textContent = Math.round(conf * 100) + "%"; $("confbar").style.width = conf * 100 + "%";
   $("fps").textContent = fps.toFixed(0);
-  $("handms").textContent = handInput.status === "ready" ? handMs.toFixed(1) : "-";
   const on = ARMS.some(a => a.state === "tracking");
   for (const id of ["pose", "pill"]) $(id).className = on ? "ok" : "bad";
   $("pose").textContent = on ? "ACTIVE" : "LOST"; $("trk").textContent = on ? "ACTIVE" : "LOST";
@@ -1417,9 +1389,9 @@ function loop() {
     frameDt = lastFrame === null ? 1 / 30 : Math.min(0.1, Math.max(0.001, now - lastFrame));
     lastFrame = now;
     ARMS.forEach(a => updateArm(a, now));
-    updateGesture(now, t0);
     updateAssembly(now);
     updateChargeHud();
+    updateArmGlow();
     updateLoops(now);
     updateFace(now);
     drawSkel();

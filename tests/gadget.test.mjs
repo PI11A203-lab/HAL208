@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  GADGET_KINDS, GESTURE_TO_GADGET, classifyHand, createChargeController, createGestureTrigger, createPunchDetector, createStableLabel,
+  GADGET_KINDS, GESTURE_TO_GADGET, classifyHand, createChargeController, createGestureTrigger, createPunchDetector, createShieldController, createStableLabel,
   elbowAngle, fingerExtended, fingerState, indexUpness, isAimPose, isFist, isOpenHand, isPointing, shotDuration, shotPhase, thumbState,
 } from '../project-chrome/js/gadget-logic.js';
 import { FLAME, GADGET } from '../project-chrome/js/config.js';
@@ -251,4 +251,43 @@ test('追跡を失って reset した後は、離れていた時間を溜めに�
   c.update(5.1, { aiming: true });
   c.update(5.4, { aiming: true });
   assert.ok(c.charge < 0.5, '溜めは戻ってから数え直す');
+});
+
+test('シールド：保持時間で1回だけ発動し、最長時間で止まり、手を解くまで再発動しない', () => {
+  const sc = createShieldController({ hold: 0.25, maxActive: 3, cooldown: 0.6 });
+  assert.equal(sc.update(0, true).on, false);
+  assert.equal(sc.update(0.24, true).on, false);
+  const r = sc.update(0.25, true);
+  assert.equal(r.on, true); assert.equal(r.fired, true);
+  assert.equal(sc.update(0.3, true).fired, false);
+  assert.equal(sc.update(0.25 + 3, true).on, false);   // 最長時間
+  assert.equal(sc.update(10, true).on, false);          // 手を保ったままは再発動しない
+  sc.update(10.1, false);
+  sc.update(11, true);
+  assert.equal(sc.update(11.25, true).on, true);        // 解いて、クールダウン後は再発動できる
+});
+
+test('シールド：認識喪失で即解除し、クールダウン中は発動しない。保持時間は持ち越さない', () => {
+  const sc = createShieldController();
+  sc.update(0, true); sc.update(0.25, true);
+  assert.equal(sc.update(0.3, false).on, false);
+  sc.update(0.4, true);
+  assert.equal(sc.update(0.9, true).on, false);         // 解除(0.3)+0.6秒のクールダウン中は候補にもならない
+  const sc2 = createShieldController();
+  sc2.update(0, true); sc2.update(0.1, false);
+  sc2.update(0.2, true);
+  assert.equal(sc2.update(0.2 + 0.24, true).on, false);
+});
+
+test('シールド：ボタンは同じ制御を通り、手の喪失では止まらず期限で終わり、連打はクールダウンで抑止', () => {
+  const sc = createShieldController({ maxActive: 3, cooldown: 0.6 });
+  assert.equal(sc.force(0), true);
+  assert.equal(sc.force(0.1), false);
+  assert.equal(sc.update(1, false).on, true);
+  assert.equal(sc.update(3, false).on, false);
+  assert.equal(sc.force(3.3), false);
+  assert.equal(sc.force(3.6), true);
+  sc.reset();
+  assert.equal(sc.update(3.7, false).on, false);
+  assert.equal(sc.force(3.7), true);
 });
