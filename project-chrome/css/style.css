@@ -112,6 +112,34 @@ body.phase-action #stage { width: 100%; max-width: calc((100vh - 100px) * 16 / 9
 #capture { background: rgba(8,20,28,.85); border: 1px solid #0e4a58; color: #cfe8ee; }
 #capture:disabled { opacity: .5; cursor: wait; }
 
+/* カメラ案内パネル（#20）。hidden の時は必ず隠す */
+[hidden] { display: none !important; }
+
+#camPanel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+  width: min(560px, 90vw);
+  padding: 20px 24px;
+  background: rgba(10, 14, 18, 0.92);
+  border: 1px solid #00e5ff;
+  color: #e6faff;
+  text-align: center;
+  line-height: 1.7;
+}
+#camPanel #camMsg { margin: 0 0 14px; }
+#camPanel #camRetry {
+  padding: 8px 20px;
+  background: #00e5ff;
+  color: #05080a;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+}
+#camPanel #camRetry:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ---- 仮想購入（#22）：映像の上に重ねる。撮影する画像（video・canvas）には入らない ---- */
 #buy { background: linear-gradient(90deg, #ffb300, #ffd54f); color: #2a1a00; border: 0; }
 #buy[hidden], #purchase[hidden], #purchase [hidden] { display: none; }

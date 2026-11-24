@@ -27,7 +27,7 @@ export function createVideoEnvironment(renderer, scene, video, { size = 256, eve
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
   const fallback = scene.environment;           // 映像を使わない時の環境（RoomEnvironment）
-  let target = null, frame = 0, enabled = true;
+  let target = null, frame = 0, enabled = true, paused = false;
   const state = { every, ambient: { r: 0.5, g: 0.5, b: 0.5, luminance: 0.5 } };
 
   function draw() {
@@ -58,14 +58,24 @@ export function createVideoEnvironment(renderer, scene, video, { size = 256, eve
     get enabled() { return enabled; },
     set enabled(v) {
       enabled = v;
-      scene.environment = v && target ? target.texture : fallback;
+      scene.environment = v && !paused && target ? target.texture : fallback;
     },
     get every() { return state.every; },
     set every(v) { state.every = Math.max(1, Math.round(v)); },
     // 部屋の平均の色・明るさ（照明を合わせるのに使う）
     get ambient() { return state.ambient; },
+    // カメラ切断中：映像の反射を止め、標準の環境に戻す（enabled の設定値は変えない）
+    suspend() {
+      paused = true;
+      scene.environment = fallback;
+    },
+    // 復帰：次の update で環境マップを作り直す
+    resume() {
+      paused = false;
+      frame = 0;
+    },
     update() {
-      if (!enabled || video.readyState < 2) return false;
+      if (!enabled || paused || video.readyState < 2) return false;
       if (frame++ % state.every !== 0) return false;
       draw();
       texture.needsUpdate = true;
