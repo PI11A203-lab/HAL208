@@ -36,6 +36,8 @@ test('モジュールのimport先と名前付きexportがつながっている',
         continue;
       }
       const target = new URL(specifier, href);
+      // キャッシュ更新用queryは実ファイル・exportの検査では取り除く。
+      target.search = '';
       assert.ok((await stat(target)).isFile(), `${fileURLToPath(target)} がありません`);
       const targetAst = modules.get(target.href);
       assert.ok(targetAst, `${specifier} は検査対象のJSモジュールである必要があります`);

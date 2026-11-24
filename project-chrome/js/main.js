@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { renderArmCards } from './collection.js';
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { loadGLB, loadArmTemplate, createArmView } from "./arms.js";
 import { createRequestTracker, handTip, handBackNormal, assignHands } from "./arm-model.js";
@@ -13,6 +14,7 @@ import { playSfx, setLoop, setSfxMuted, setSfxVolume, sfxMuted, stopAllLoops, un
 import { createChargeController, createGestureTrigger, createPunchDetector, shotPhase, shotDuration, isAimPose, elbowAngle,
          classifyHand, createStableLabel, isFist, isOpenHand, GESTURE_TO_GADGET } from "./gadget-logic.js";
 import { earShape } from "./face.js";
+import { trackState, armAge, shoulderWidth, isFinitePoint, clampZStep, gateZByVis, reprojectXY, handOrientation, HOLD_SEC } from "./arm-tracking.js";
 import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
 import { createHairTracker } from './hair-tracking.js';
@@ -30,12 +32,12 @@ const info = document.getElementById("info");
 // 初期設定は config.js から読み込みます。
 const settings = { ...DEFAULTS };
 const VIS_MIN = 0.5;      // この信頼度未満の点は更新しない
-const HOLD_SEC = 0.6;     // 検出が途切れた点の最終位置を保持する時間（秒）
+// HOLD_SEC（保持時間）と tracking/holding/lost の境界は arm-tracking.js で一元管理する。
 const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位）
 
 /* ---------------- One Euro フィルター ---------------- */
 import { OneEuro } from './tracking.js';
-import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
+import { createExperience, reduceExperience, armDisplayMode, EVENTS, PHASES } from './experience.js?v=2';
 // 装着音の入口（#15）。腕のギミックの効果音（sfx.js）と名前が重ならないよう別名で読む
 import { unlockAudio as unlockEquipSound, playEquip } from './sound.js';
 
@@ -49,7 +51,7 @@ try {
   visionFiles = vision;
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
       delegate: "GPU",
     },
     runningMode: "VIDEO",
@@ -105,8 +107,25 @@ scene.add(key);
 // クロームに実際の部屋を映し、部屋の明るさに照明を合わせる（TRACKING SETTINGS の Room reflections）
 const roomEnv = createVideoEnvironment(renderer, scene, video);
 
-const camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
-camera.position.z = 2000;
+// カメラ：ARM_TUNING.usePerspective で透視/正射影を切替。
+// 透視投影：被写体から camDist だけ引き、z=0平面上では正射影と同じ画面位置になるFOVを使う。
+//   x=q.x*W / y=q.y*H のピクセル座標はそのまま画面に一致し、z≠0 の点にだけ遠近（奥は小さく）が効く。
+//   腕の前後関係が「重なり順」だけでなく「大きさ」でも表現され、交差時の破綻が減る。
+// 正射影：従来挙動（遠近なし）。切り分け・フォールバック用。
+let camera;
+if (ARM_TUNING.usePerspective) {
+  const camDist = ARM_TUNING.camDist;
+  const fovRad = 2 * Math.atan((H / 2) / camDist);
+  camera = new THREE.PerspectiveCamera(
+    THREE.MathUtils.radToDeg(fovRad), W / H, ARM_TUNING.near, ARM_TUNING.far);
+  camera.position.set(W / 2, H / 2, camDist);
+  camera.lookAt(W / 2, H / 2, 0);
+} else {
+  camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
+  camera.position.z = 2000;
+}
+// 揺れ演出の基準位置。正射影は(0,0)、透視投影は(W/2,H/2)。揺れはこの位置を中心に加える。
+const camBaseX = camera.position.x, camBaseY = camera.position.y;
 const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
 /* ---------------- ロボットアームモデル ---------------- */
@@ -120,7 +139,7 @@ const sphereGeo = new THREE.SphereGeometry(1, 32, 24);
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const torusGeo = new THREE.TorusGeometry(1, 0.08, 12, 48);
 
-function makeArm(name, ids) {
+function makeArm(name, ids, handIds) {
   const g = new THREE.Group();
   const m = {
     shoulder: new THREE.Mesh(sphereGeo, jointMat),
@@ -134,10 +153,11 @@ function makeArm(name, ids) {
   Object.values(m).forEach(mesh => g.add(mesh));
   g.visible = false;
   scene.add(g);
-  return { name, ids, g, m, state: "lost" };
+  // ids=[肩,肘,手首]（状態判定・腕本体用）、handIds=[人差し指付け根,小指付け根]（手の向き用）。
+  return { name, ids, handIds, g, m, state: "lost" };
 }
-// MediaPipe：本人の左腕は 11-13-15、右腕は 12-14-16
-const ARMS = [makeArm("Left arm", [11, 13, 15]), makeArm("Right arm", [12, 14, 16])];
+// MediaPipe Pose：左腕 11-13-15（手首）＋ 19/17（人差し指/小指付け根）、右腕 12-14-16 ＋ 20/18。
+const ARMS = [makeArm("Left arm", [11, 13, 15], [19, 17]), makeArm("Right arm", [12, 14, 16], [20, 18])];
 // カスタムGLBモデルの読み込みには arms.js の loadGLB() を使用できます。
 
 /* ---------------- GLB腕モデル（Issue #7） ---------------- */
@@ -187,7 +207,7 @@ function updateAssembly(now) {
   });
   assemblyFx.sparks.update(frameDt, bodyScale * 4);
   if (!a || armModel.status !== "ready") return;
-  const visible = ARMS.filter(arm => arm.state !== "lost" && armsShown());
+  const visible = ARMS.filter(arm => arm.state !== "lost" && armDisplayMode(exp) === 'action');
   if (a.start === null) {
     if (!visible.length) { armModel.views.forEach(v => v.setAssembly(0)); return; }   // 人が映るまで待つ
     a.start = now;
@@ -219,10 +239,11 @@ function updateAssembly(now) {
   if (t >= total) { armModel.assembly = null; box.style.display = "none"; }
 }
 
-async function useArmModel(id) {
+async function useArmModel(id, { animate = true } = {}) {
   if (armModel.id === id && armModel.status === "ready") {   // 同じモデルは読み直さず外観だけ更新
     armModel.views.forEach(v => v.applyAppearance(design));
-    startAssembly();
+    if (animate) startAssembly();
+    else { armModel.assembly = null; armModel.views.forEach(v => v.setAssembly(null)); }
     say(design.name + " を適用しました。");
     return;
   }
@@ -241,8 +262,13 @@ async function useArmModel(id) {
     views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
     armModel.views = views; armModel.model = model; armModel.status = "ready";
     // 部品は腕の外側・上から飛んでくる（MediaPipe の 12＝本人の右肩は映像の左側）
-    views.forEach((v, i) => v.setAssembly(0, [(ARMS[i].ids[0] === 12 ? -1 : 1) * W * 0.45, H * 0.3, 200]));
-    startAssembly();
+    if (animate) {
+      views.forEach((v, i) => v.setAssembly(0, [(ARMS[i].ids[0] === 12 ? -1 : 1) * W * 0.45, H * 0.3, 200]));
+      startAssembly();
+    } else {
+      armModel.assembly = null;
+      views.forEach(v => v.setAssembly(null));
+    }
     if (views.some(v => v.hasFingers)) ensureHandLandmarker();   // 指の追跡は必要になってから読み込む
     console.info(`腕モデル ${id} を ${Math.round(performance.now() - t0)} ms で読み込みました。`);
     say(design.name + " を適用しました。");
@@ -255,8 +281,9 @@ async function useArmModel(id) {
   }
 }
 
-/* ---------------- 関節疾患 ---------------- */
-const JOINTS = [11, 12, 13, 14, 15, 16];
+/* ---------------- 関節の追跡点 ---------------- */
+// 11-16=肩/肘/手首。17-20=手の向き用（小指/人差し指付け根の左右、handOrientation で使用）。
+const JOINTS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 const joints = {};
 function resetJoints() {
   for (const id of JOINTS) {
@@ -359,24 +386,50 @@ function processFrame(result, now) {
   if (!lm) return;
   const minCutoff = 3.0 * Math.pow(0.1, settings.smooth); // 0 → 3Hz（平滑化が弱い）、1 → 0.3Hz（平滑化が強い）
   for (const id of JOINTS) {
-    const q = lm[id], j = joints[id]; j.vis = q.visibility ?? 0;
-    if ((q.visibility ?? 0) < VIS_MIN) continue;        // 信頼度の低い点：最後の位置を保持
+    const q = lm[id], j = joints[id];
+    // 欠落点は visibility を参照する前に弾く（q が無いと q.visibility で TypeError になるため）。
+    // lastSeen を更新せず最後の位置を保持する（契約：異常点で跳ばさない）。
+    if (!q) continue;
+    j.vis = q.visibility ?? 0;
+    if (j.vis < VIS_MIN) continue;                      // 信頼度の低い点：最後の位置を保持
+    // 非有限値（NaN/Infinity）の点も同様に保持。
+    if (!isFinitePoint({ x: q.x, y: q.y, z: q.z ?? 0 })) continue;
     if (now - j.lastSeen > 0.3) { j.fx.reset(); j.fy.reset(); j.fz.reset(); } // 長く途切れた後に滑って戻らないようリセット
-    j.p.set(j.fx.filter(q.x * W, now, minCutoff, BETA),
-            j.fy.filter(q.y * H, now, minCutoff, BETA),
-            j.fz.filter(q.z * W, now, minCutoff, BETA));  // z：相対的な「推定」奥行き（実測ではない）
+    const x = j.fx.filter(q.x * W, now, minCutoff, BETA);
+    const y = j.fy.filter(q.y * H, now, minCutoff, BETA);
+    // z（奥行き）は単眼で最も不安定。x/yより弱いカットオフで強めに平滑化し、
+    // さらにフレーム間の跳ねを肩幅基準でクランプして「荒ぶり」を抑える（実測ではない推定値）。
+    const zFiltered = j.fz.filter((q.z ?? 0) * W, now, minCutoff * ARM_TUNING.zSmoothFactor, BETA);
+    // ① visゲート：隠れてvisが落ちた点のzは信用せず直前値を凍結（荒ぶりの根元を断つ）。
+    // ② ステップクランプ：凍結を通った更新でも、残る跳ねを肩幅基準で抑える。
+    const zGated = gateZByVis(j.p.z, zFiltered, j.vis, ARM_TUNING.zVisFreeze);
+    const z = clampZStep(j.p.z, zGated, bodyScale * ARM_TUNING.zMaxStepRatio);
+    j.p.set(x, y, z);
     j.raw.set(q.x * W, q.y * H);
     j.lastSeen = now;
   }
   const a = joints[11], b = joints[12];
   if (now - a.lastSeen < 0.3 && now - b.lastSeen < 0.3) {
-    bodyScale = Math.max(Math.hypot(a.p.x - b.p.x, a.p.y - b.p.y), 0.1 * W);
+    // 有効な両肩から肩幅を更新。異常値（0・非有限・画面幅超）は前回値を保持。
+    bodyScale = shoulderWidth(a.p, b.p, W, bodyScale);
   }
 }
 
 /* ---------------- 腕の配置 ---------------- */
 const Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
-const conv = p => new THREE.Vector3(p.x, H - p.y, -p.z * settings.depth);
+// ピクセル空間→シーン座標。y軸は上向き（H-y）。
+// zは settings.depth（UI 0..1）× ARM_TUNING.zDepthScale（config）で最終スケール。
+// 透視投影のnearクリップで腕が消えないよう、増幅は控えめにする。
+// 透視投影時は、zが付くと投影で画面中心基準に再拡大され追跡点からずれるため、
+// reprojectXY で中心オフセットを逆数倍に縮め、投影後に映像ピクセルへ戻す（実腕と一致）。
+// 正射影時は再拡大が起きないので補正しない（そのまま渡す）。
+const conv = p => {
+  const zScene = -p.z * settings.depth * ARM_TUNING.zDepthScale;
+  const yFlip = H - p.y;
+  if (!ARM_TUNING.usePerspective) return new THREE.Vector3(p.x, yFlip, zScene);
+  const r = reprojectXY(p.x, yFlip, zScene, W / 2, H / 2, ARM_TUNING.camDist);
+  return new THREE.Vector3(r.x, r.y, zScene);
+};
 
 function setCyl(mesh, a, b, r) {
   const d = new THREE.Vector3().subVectors(b, a);
@@ -474,6 +527,7 @@ function startShot(i, power, opened, now, dir, kind = idleKind()) {
 }
 
 function fireGadget(now) {
+  if (armDisplayMode(exp) !== 'action') return;
   if (gadget.kind === "off") { say("GADGET で種類を選んでください。"); return; }
   ARMS.forEach((a, i) => { if (a.state !== "lost") startShot(i, 1, false, now, gadget.curDir[i]); });
 }
@@ -508,8 +562,8 @@ function autoGestures(i, pts, angle, aiming, now) {
 function updateGadget(arm, s, now) {
   const i = ARMS.indexOf(arm), view = gadget.views?.[i];
   // 追跡を失った時は、この腕の溜め・弾・判定を取り消す（画面外にいた時間が溜めに加わらないように）
-  if (!s) resetArmGadget(i);
-  if (!view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
+  if (!s || armDisplayMode(exp) !== 'action') resetArmGadget(i);
+  if (armDisplayMode(exp) !== 'action' || !view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
   view.setVisible(true);
   const ctrl = gadget.ctrls[i];
   const d = new THREE.Vector3().subVectors(s.wr, s.el);
@@ -543,8 +597,8 @@ function updateGadget(arm, s, now) {
 let shakeAmp = 0;
 function applyShake(dt) {
   const k = shakeAmp * bodyScale * 0.025;
-  camera.position.x = (Math.random() - 0.5) * k;
-  camera.position.y = (Math.random() - 0.5) * k;
+  camera.position.x = camBaseX + (Math.random() - 0.5) * k;
+  camera.position.y = camBaseY + (Math.random() - 0.5) * k;
   shakeAmp *= Math.exp(-dt * 9);
   if (shakeAmp < 0.01) shakeAmp = 0;
 }
@@ -552,7 +606,7 @@ function applyShake(dt) {
 // 人差し指だけを立てると、指先に火がつく（手を追跡している時のみ）
 function updateFlame(arm, hand, now) {
   const i = ARMS.indexOf(arm), st = pointing[i];
-  const on = Boolean(hand) && currentLabel[i] === "point";
+  const on = armDisplayMode(exp) === 'action' && Boolean(hand) && currentLabel[i] === "point";
   if (on) { if (st.since === null) st.since = now; } else st.since = null;
   const lit = on && now - st.since >= FLAME.holdSec;
   if (lit && !st.lit) playSfx("flame-ignite", { volume: 0.8 });   // 火が点いた瞬間
@@ -589,7 +643,7 @@ function updateChargeHud() {
   $("chargeval").textContent = c >= 1 ? "MAX" : Math.round(c * 100) + "%";
   // 操作ガイド：AUTO の時だけ表示し、いま認識している手の形を光らせる
   const guide = $("gesturebox");
-  guide.style.display = gadget.kind === "auto" && armsShown() ? "block" : "none";
+  guide.style.display = gadget.kind === "auto" && armDisplayMode(exp) === 'action' ? "block" : "none";
   const seen = new Set(gadget.labels.filter(Boolean));
   if (gadget.ctrls.some(x => x.mode === "charging")) seen.add("open");
   guide.querySelectorAll("[data-gs]").forEach(el => el.classList.toggle("on", seen.has(el.dataset.gs)));
@@ -597,8 +651,10 @@ function updateChargeHud() {
 
 function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
-  const age = Math.max(...js.map(j => now - j.lastSeen));
-  arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
+  // 追跡状態の境界は arm-tracking.js で一元管理（tracking<0.1秒, holding<0.6秒, lost）。
+  const lastSeen = {}; for (const id of arm.ids) lastSeen[id] = joints[id].lastSeen;
+  const age = armAge(arm.ids, lastSeen, now);
+  arm.state = trackState(age);
   const show = armsShown() && age < HOLD_SEC;
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
@@ -606,6 +662,8 @@ function updateArm(arm, now) {
   if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
+  // 非有限座標なら描画をスキップ（契約：異常点でモデルを跳ばさない）。
+  if (!isFinitePoint(sh) || !isFinitePoint(el) || !isFinitePoint(wr)) return;
   const m = arm.m;
   // 腕の太さ：測れていれば実際の幅（少し大きめ）、測れていなければ肩幅から推定
   const k = settings.thick * design.thick;
@@ -636,10 +694,28 @@ function updateArm(arm, now) {
   const fl = Math.max(fd.length(), 1e-3);
   fd.divideScalar(fl);
 
-  // 手（簡易ボックス）：手首から先へ配置。手首のひねり（ロール）は分からないため単純な形にしている
+  // 手（簡易ボックス）：手首から先へ配置。
+  // 手ランドマーク（人差し指/小指付け根）が十分見えていれば、手の向き・ひねりに追従させる。
+  // 見えない場合は前腕方向へ伸ばす従来挙動にフォールバック（契約：見えない点で無理に向けない）。
   const handLen = fl * 0.45;
-  m.hand.position.copy(wr).addScaledVector(fd, handLen / 2);
-  m.hand.quaternion.setFromUnitVectors(Y, fd);
+  const [idxJ, pinJ] = arm.handIds.map(i => joints[i]);
+  const handVisOk = (now - idxJ.lastSeen < HOLD_SEC) && (now - pinJ.lastSeen < HOLD_SEC) &&
+                    idxJ.vis >= VIS_MIN && pinJ.vis >= VIS_MIN;
+  const ho = handVisOk ? handOrientation(wr, conv(idxJ.p), conv(pinJ.p)) : null; // 手首・指はシーン座標へ
+  if (ho) {
+    // forward=手の指す向き、normal=手の甲の法線（ロール）。両者から正規直交基底を作り、手をひねりまで追従させる。
+    const fwd = new THREE.Vector3(ho.forward.x, ho.forward.y, ho.forward.z);
+    const nrm = new THREE.Vector3(ho.normal.x, ho.normal.y, ho.normal.z);
+    const side = new THREE.Vector3().crossVectors(nrm, fwd).normalize();
+    const up2 = new THREE.Vector3().crossVectors(fwd, side).normalize(); // 直交化
+    // ボックスのローカルY(長軸)を手の向きfwd、Z(厚み方向)を法線に合わせる。
+    m.hand.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, fwd, up2));
+    m.hand.position.copy(wr).addScaledVector(fwd, handLen / 2);
+  } else {
+    // フォールバック：手ランドマークが見えないときは前腕方向へ伸ばす（従来挙動）。
+    m.hand.position.copy(wr).addScaledVector(fd, handLen / 2);
+    m.hand.quaternion.setFromUnitVectors(Y, fd);
+  }
   m.hand.scale.set(base * 1.5, handLen, base * 0.7);
   if (handOffset) m.hand.position.add(new THREE.Vector3().fromArray(handOffset));   // ロケットフィスト
 
@@ -712,6 +788,11 @@ const earController = createEarController({
   onError: () => { earLoadError = 'GLBが未配置または読込に失敗しました。CLASSICの耳を表示します。OFF→ONで再試行できます。'; },
 });
 function syncEarModel() {
+  document.querySelectorAll('#headCards button').forEach(button => {
+    const active = face.ears && button.dataset.ear === face.earModel;
+    button.classList.toggle('sel', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   // 切替・RESET直後にも旧表示を隠す。次の推論フレームを待たない。
   ears.forEach(ear => { ear.g.visible = false; });
   earController.asset?.roots.forEach(root => { root.visible = false; });
@@ -866,13 +947,12 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js';
+import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-let exp = createExperience(); // APPLYを押すまで腕は表示しない
+let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
 let purchase = null;          // 仮想購入の画面（#22）。下の「仮想購入」で作る
-// 腕（簡易形状・GLB・ギミック）を表示するのは体験フェーズ（ACTION）の時だけ（#15）
-function armsShown() { return exp.phase === PHASES.ACTION; }
+function armsShown() { return armDisplayMode(exp) !== 'none'; }
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -880,21 +960,23 @@ function applyDesign(d) {
   neonMat.color.setHex(d.neon); neonMat.emissive.setHex(d.neon); neonMat.emissiveIntensity = d.glow;
   design = d;
 }
-function thumb(d) { // 仮の簡易イラスト（実際のモデルではない）
-  const [m, j, n] = d.css;
-  return `<svg viewBox="0 0 60 80"><g transform="rotate(14 30 40)"><rect x="22" y="3" width="16" height="33" rx="8" fill="${m}" stroke="${n}" stroke-opacity=".5"/>` +
-    `<circle cx="30" cy="39" r="7" fill="${j}" stroke="${n}" stroke-width="2"/><rect x="24" y="44" width="12" height="25" rx="6" fill="${m}" stroke="${n}" stroke-opacity=".5"/>` +
-    `<rect x="19" y="67" width="22" height="9" rx="3" fill="${j}" stroke="${n}" stroke-opacity=".6"/></g></svg>`;
-}
 function renderCards() {
-  $("cards").innerHTML = Object.entries(DESIGNS).map(([k, d]) =>
-    `<div class="card ${k === selected ? "sel" : ""}" data-k="${k}">${thumb(d)}<b>${d.name}</b><p>${d.desc}</p><span>${k === selected ? "✓ SELECTED" : "SELECT"}</span></div>`).join("");
-  const d = DESIGNS[selected];
-  $("dname").textContent = d.name; $("ddesc").textContent = d.long;
-  ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
+  renderArmCards(selected);
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
-$("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
+$("cards").onclick = e => {
+  const card = e.target.closest('.card');
+  if (!card || card.disabled || exp.phase !== PHASES.SELECT) return;
+  selected = card.dataset.k;
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  applyDesign(DESIGNS[selected]);
+  resetGadgetState();
+  armModel.assembly = null;
+  $("assemblybox").style.display = 'none';
+  if (design.model) useArmModel(design.model, { animate: false });
+  else clearArmModel();
+  renderCards();
+};
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 const EQUIP_MS = 1000;
 let equipTimer = null;
@@ -940,6 +1022,9 @@ $("back").onclick = () => {
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
   purchase?.cancel(); // 購入の途中なら取り消す（#22）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
+  armModel.assembly = null;
+  armModel.views?.forEach(view => view.setAssembly(null));
+  $("assemblybox").style.display = 'none';
   resetGadgetState(); // 溜め・弾・判定・音を持ち越さない
   syncPhaseUI();
   say("装備選択に戻りました。");
@@ -954,6 +1039,7 @@ window.addEventListener("keydown", e => {
   else if (e.key === "Escape") setStaffConfirm(false);
 });
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
+$("showStaff").onchange = e => document.body.classList.toggle('show-staff', e.target.checked);
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
@@ -1003,7 +1089,7 @@ function doReset() {
   resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
   setGadgetKind("auto");
   // タブを初期表示（ARMS）へ戻す
-  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x.dataset.t === "arms"); x.setAttribute("aria-pressed", String(x.dataset.t === "arms")); });
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
   $("apply").style.display = "";
   syncPhaseUI();
@@ -1014,11 +1100,12 @@ $("gadgetFire").onclick = () => fireGadget(performance.now() / 1000);
 document.addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "g" && !(e.target instanceof HTMLInputElement)) fireGadget(performance.now() / 1000);
 });
+document.querySelectorAll('#panel button, #stage button').forEach(button => { button.disabled = false; });
 renderCards();
 syncPhaseUI();
 setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
-  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
+  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x === t); x.setAttribute("aria-pressed", String(x === t)); });
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
   $("apply").style.display = "";
 });
@@ -1029,6 +1116,15 @@ $("eyeOp").oninput = e => face.eyeOp = +e.target.value;
 $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face.eyeMode = m; document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b === e.target)); };
 $("ears").onchange = e => { face.ears = e.target.checked; syncEarModel(); };
 $("earModel").onchange = e => { face.earModel = e.target.value; syncEarModel(); };
+$("headCards").onclick = e => {
+  const button = e.target.closest('button[data-ear]');
+  if (!button) return;
+  face.earModel = button.dataset.ear;
+  face.ears = true;
+  $("ears").checked = true;
+  $("earModel").value = face.earModel;
+  syncEarModel();
+};
 $("earLEDCol").oninput = e => { face.earLEDCol = e.target.value; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earLEDOn").onchange = e => { face.earLEDOn = e.target.checked; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earSize").oninput = e => face.earSize = +e.target.value;
