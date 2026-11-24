@@ -177,3 +177,88 @@ test('購入画面の要素が index.html にあり、案内に「決済は発�
   for (const id of [...IDS, 'buy']) assert.match(html, new RegExp(`id="${id}"`), id);
   assert.match(html, /決済は発生しません/);
 });
+
+/* ---- レシート準備中の取り消し（#27 のレビュー） ---- */
+// 登録を手で終わらせられる register と、取り消しの記録
+function makeCancelFlow(opts = {}) {
+  const calls = { registered: [], unregistered: [] };
+  let finish, fail;
+  const made = makeFlow({
+    register: (photo, { signal, requestId }) => {
+      calls.registered.push({ signal, requestId });
+      return new Promise((resolve, reject) => {
+        finish = () => resolve({ url: `http://192.168.0.5:8001/r/${requestId}` });
+        fail = reject;
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    },
+    unregister: async (id) => { calls.unregistered.push(id); },
+    makeRequestId: (() => { let n = 0; return () => `req_${String(++n).padStart(16, '0')}`; })(),
+    ...opts,
+  });
+  return { ...made, calls, finish: () => finish(), fail: (e) => fail(e) };
+}
+async function toConfirming(m) {
+  m.flow.buy(); m.els.pStart.onclick(); m.setNow(3); m.flow.tick(); await settle();
+  m.els.pConfirm.onclick(); await settle();
+  assert.equal(m.flow.phase, PURCHASE.CONFIRMING);
+}
+
+for (const [name, cancel] of [
+  ['BACK・APPLY（cancel）', (m) => m.flow.cancel()],
+  ['スタッフ用リセット（reset）', (m) => m.flow.reset()],
+]) {
+  test(`画面：レシート準備中に${name}すると、登録を止めてサーバーのレシートも消す`, async () => {
+    const m = makeCancelFlow();
+    await toConfirming(m);
+    const { signal, requestId } = m.calls.registered[0];
+    assert.ok(requestId);
+    cancel(m);
+    await settle();
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(m.calls.unregistered, [requestId]);
+    assert.equal(m.flow.phase, PURCHASE.IDLE);
+    assert.equal(m.els.pQr.hidden, true);
+  });
+}
+
+test('画面：取り消しの後で登録が終わっても QR は出さず、レシートを消す', async () => {
+  let done, id;
+  const m = makeCancelFlow({
+    // signal を無視して最後まで終わってしまう登録
+    register: (photo, { requestId }) => new Promise((resolve) => { id = requestId; done = () => resolve({ url: 'http://x/r/late' }); }),
+  });
+  await toConfirming(m);
+  m.flow.cancel();
+  done(); await settle();
+  assert.equal(m.flow.phase, PURCHASE.IDLE);
+  assert.equal(m.els.pQrCanvas.qr, undefined);
+  assert.ok(m.calls.unregistered.length >= 1 && m.calls.unregistered.every((x) => x === id));
+});
+
+test('画面：QR の描画に失敗した時もレシートを消してエラーを出す', async () => {
+  const m = makeCancelFlow({ drawQr: async () => { throw new Error('QR を描けません'); } });
+  await toConfirming(m);
+  m.finish(); await settle(); await settle();
+  assert.equal(m.flow.phase, PURCHASE.ERROR);
+  assert.deepEqual(m.calls.unregistered, [m.calls.registered[0].requestId]);
+});
+
+test('画面：登録が失敗した時はエラー表示（取り消しの扱いにしない）', async () => {
+  const m = makeCancelFlow();
+  await toConfirming(m);
+  m.fail(new Error('レシートのサーバーが起動していません')); await settle();
+  assert.equal(m.flow.phase, PURCHASE.ERROR);
+  assert.match(m.els.pErrorMsg.textContent, /サーバー/);
+});
+
+test('画面：QR を出した後の「終了」ではレシートを消さない（スマホで保存できるように）', async () => {
+  const m = makeCancelFlow();
+  await toConfirming(m);
+  m.finish(); await settle(); await settle();
+  assert.equal(m.flow.phase, PURCHASE.QR);
+  m.els.pDone.onclick(); await settle();
+  assert.equal(m.flow.phase, PURCHASE.IDLE);
+  assert.deepEqual(m.calls.unregistered, []);
+  assert.equal(m.calls.registered[0].signal.aborted, false);
+});
