@@ -560,8 +560,8 @@ function autoGestures(i, pts, angle, aiming, now) {
 function updateGadget(arm, s, now) {
   const i = ARMS.indexOf(arm), view = gadget.views?.[i];
   // 追跡を失った時は、この腕の溜め・弾・判定を取り消す（画面外にいた時間が溜めに加わらないように）
-  if (!s || armDisplayMode(exp) !== 'action') resetArmGadget(i);
-  if (armDisplayMode(exp) !== 'action' || !view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
+  if (!s || !gimmicksOn()) resetArmGadget(i);
+  if (!gimmicksOn() || !view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
   view.setVisible(true);
   const ctrl = gadget.ctrls[i];
   const d = new THREE.Vector3().subVectors(s.wr, s.el);
@@ -604,7 +604,7 @@ function applyShake(dt) {
 // 人差し指だけを立てると、指先に火がつく（手を追跡している時のみ）
 function updateFlame(arm, hand, now) {
   const i = ARMS.indexOf(arm), st = pointing[i];
-  const on = armDisplayMode(exp) === 'action' && Boolean(hand) && currentLabel[i] === "point";
+  const on = gimmicksOn() && Boolean(hand) && currentLabel[i] === "point";
   if (on) { if (st.since === null) st.since = now; } else st.since = null;
   const lit = on && now - st.since >= FLAME.holdSec;
   if (lit && !st.lit) playSfx("flame-ignite", { volume: 0.8 });   // 火が点いた瞬間
@@ -641,7 +641,7 @@ function updateChargeHud() {
   $("chargeval").textContent = c >= 1 ? "MAX" : Math.round(c * 100) + "%";
   // 操作ガイド：AUTO の時だけ表示し、いま認識している手の形を光らせる
   const guide = $("gesturebox");
-  guide.style.display = gadget.kind === "auto" && armDisplayMode(exp) === 'action' ? "block" : "none";
+  guide.style.display = gadget.kind === "auto" && gimmicksOn() ? "block" : "none";
   const seen = new Set(gadget.labels.filter(Boolean));
   if (gadget.ctrls.some(x => x.mode === "charging")) seen.add("open");
   guide.querySelectorAll("[data-gs]").forEach(el => el.classList.toggle("on", seen.has(el.dataset.gs)));
@@ -993,7 +993,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js?v=33-develop-merge';
+import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS, ATTRACT_MODE, HAND_POINTER } from './config.js?v=33-develop-merge';
 import {
   APPEARANCE_KEYS, createAppearanceState, selectPreset, editDraft,
   applyDraft, switchDesign, resetAppearance,
@@ -1420,6 +1420,99 @@ function updateHud(now) {
   });
 }
 
+/* ---------------- 待機画面（アトラクトモード） ---------------- */
+// 誰もいない時：暗くしたライブ映像に「カメラの前に立ってください」と立ち位置、右にショーケース。
+// 人が1秒いたら開始（関節が光る→WELCOME）。いなくなって一定時間たったら、スタッフ用リセットと同じ処理をして待機へ戻る
+import { createAttract, presence, ATTRACT_DEFAULTS } from './attract-state.js';
+import { createAttractView } from './attract-ui.js';
+import { createHandTips, renderHandTip } from './hand-tips.js';
+const handTips = createHandTips();   // 初めての来場者向けの操作案内（来場者ごとに1回）
+const attract = createAttract(ATTRACT_MODE);
+const attractView = createAttractView({
+  cycleSec: ATTRACT_MODE.cycleSec,
+  items: [
+    ...Object.entries(DESIGNS).map(([key, d]) => ({ category: 'ARMS', name: d.name, desc: d.desc, img: `./assets/shop/${key}.png` })),
+    { category: 'MASK', name: 'PROTOTYPE 04', desc: '機械式ハーフマスク', img: './assets/shop/mask-prototype.png' },
+    { category: 'MASK', name: 'ONI 04 / 鬼面', desc: '赤いLEDと牙のある鬼面', img: './assets/shop/mask-oni.png' },
+    { category: 'MASK', name: 'RABBIT 04 / ウサギ', desc: '白い外装のウサギマスク', img: './assets/shop/mask-rabbit.png' },
+    { category: 'HEAD', name: 'PROTOTYPE 04', desc: '機械式猫耳', img: './assets/shop/cat.png' },
+    { category: 'HEAD', name: 'RABBIT LED', desc: 'LEDウサギ耳', img: './assets/shop/rabbit.png' },
+  ],
+});
+let attractOn = ATTRACT_MODE.enabled;
+$("attractOn").checked = attractOn;
+$("attractOn").onchange = e => {
+  attractOn = e.target.checked;
+  const now = performance.now() / 1000;
+  if (attractOn) attract.reset(now); else attract.skip(now);
+};
+function updateAttract(result, now) {
+  if (!attractOn) { attractView.render('active', 1, now, null); return; }
+  const lm = result.landmarks?.[0] ?? null;
+  // 購入中（QR の読み取りで少し離れる時など）は長めに待つ
+  const seen = presence(lm, { ...ATTRACT_DEFAULTS, ...ATTRACT_MODE });
+  const { state, progress, event, countdown } = attract.update({ present: seen.present, hold: Boolean(purchase?.active) }, now);
+  if (event === 'welcome') { playSfx("assemble-done", { volume: 0.5 }); handTips.welcome(now, 1.4); }   // WELCOME の後に指の案内
+  if (event === 'reset') { setStaffConfirm(false); doReset(); handTips.reset(); say("待機画面に戻りました。"); }
+  attractView.render(state, progress, now, lm, seen.reason, { side: seen.side, countdown });
+}
+
+/* ---------------- タッチレス操作（指先カーソル） #36 ---------------- */
+// 腕を上げて人差し指で指すとカーソルが出て、ボタンの上で約1秒止めると選ぶ。▲▼の帯の上ではストアの一覧をスクロール。
+// 選択画面：カーソル。体験中：ギミック（両手を上げて1秒でメニュー＝カーソルへ切替）。
+// 仮想購入：カウントダウン中はギミック（写真のポーズ用）、案内・確認・QR の画面ではカーソル。
+import { createHandPointer, createMenuToggle, bothHandsUp, handModes } from './hand-pointer.js';
+import { createHandCursor } from './hand-cursor.js';
+const handPointer = createHandPointer(HAND_POINTER);
+const handMenu = createMenuToggle({ holdSec: HAND_POINTER.menuHoldSec, idleSec: HAND_POINTER.menuIdleSec });
+let handMode = { cursor: false, gimmicks: true };
+let handPointing = false;
+// ギミックを動かしてよいか（体験中で、メニュー・購入の画面を手で操作していない時）
+function gimmicksOn() { return armDisplayMode(exp) === 'action' && handMode.gimmicks; }
+const handCursor = createHandCursor({
+  selector: '#panel button, #stage button, #storeIntro button, [data-hand-scroll]',
+  scrollSpeed: HAND_POINTER.scrollSpeed,
+  exclude: 'details, #staffConfirm, .tab.locked',     // スタッフ用設定などは手では選ばない
+  dwellSec: HAND_POINTER.dwellSec,
+  cooldownSec: HAND_POINTER.cooldownSec,
+  onSelect: () => playSfx("assemble-lock", { volume: 0.35, rate: 1.6 }),
+});
+function updateHandPointer(result, now) {
+  if (!HAND_POINTER.enabled) { handMode = { cursor: false, gimmicks: true }; return; }
+  // 待機画面（誰もいない・スキャン中・またのお越しを）の間は手のカーソルを出さない
+  if (attractOn && attract.state !== 'active') {
+    handMode = { cursor: false, gimmicks: false }; handMenu.reset(); handPointing = false;
+    handPointer.reset(); handCursor.update(null, now); $("handMenu").hidden = true; return;
+  }
+  const lm = result.landmarks?.[0] ?? null;
+  const state = { phase: exp.phase, purchase: purchase?.phase ?? 'idle', menu: handMenu.active };
+  if (exp.phase !== PHASES.ACTION) handMenu.reset();
+  let progress = 0;
+  if (handModes(state).menuToggle) {
+    ({ active: state.menu, progress } = handMenu.update({ bothUp: bothHandsUp(lm), pointing: handPointing }, now));
+  } else state.menu = handMenu.active;
+  handMode = handModes(state);
+  // メニューの案内：両手を上げている途中の進み具合と、メニュー中であること
+  const hint = $("handMenu");
+  hint.hidden = !(handModes(state).menuToggle && (state.menu || progress > 0));
+  hint.textContent = state.menu ? "MENU MODE｜指でボタンを選べます（両手を上げるとギミックに戻ります）"
+    : `両手を上げたまま… ${Math.round(progress * 100)}%`;
+  if (!handMode.cursor) { handPointing = false; handPointer.reset(); handCursor.update(null, now); return; }
+  const point = handPointer.update(lm, now);
+  handPointing = Boolean(point);
+  handCursor.update(point, now);
+}
+
+// 操作案内：体験（ACTION）が始まったらメニューの案内。待機画面・購入の画面の間は出さない
+let tipPhase = exp.phase;
+function updateHandTips(now) {
+  if (exp.phase === PHASES.ACTION && tipPhase !== PHASES.ACTION) handTips.action(now);
+  tipPhase = exp.phase;
+  const tip = handTips.update({ pointer: handPointing, menu: handMenu.active }, now);
+  const blocked = (attractOn && attract.state !== 'active') || Boolean(purchase?.active);
+  renderHandTip($("handTip"), blocked ? null : tip);
+}
+
 /* ---------------- カメラの状態に応じた処理（#20） ---------------- */
 const CAM_MESSAGES = {
   denied: "カメラの許可がブロックされています。アドレスバーの鍵マークや設定から、このサイトのカメラを「許可」に変えてから再試行してください（再試行だけでは許可は変わりません）。",
@@ -1485,6 +1578,9 @@ function setCamPanel(show, text = "") {
 
 function onCameraChange({ state, reason, width, height }) {
   camState = state;
+  // 待機画面：カメラが使えない間は隠し（カメラの案内を見せる）、使えるようになったら待機から始め直す
+  if (state !== "ready") attractView.render("active", 1, 0, null);
+  else if (attractOn) attract.reset(performance.now() / 1000);
   syncPhaseUI();
   $("capture").disabled = state !== "ready";
   if (state === "ready") {
@@ -1521,6 +1617,9 @@ function loop() {
     const now = t0 / 1000;
 
     processFrame(result, now);
+    updateAttract(result, now);
+    updateHandPointer(result, now);
+    updateHandTips(now);
     processBodyFit(result);
     processHands(t0, now);
     if (face.ears || face.eyeMode !== "off" || maskSettings.enabled) processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行

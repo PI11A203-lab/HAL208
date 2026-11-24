@@ -56,7 +56,9 @@
         <div data-gs="spider"><span>🤟</span>人差し指と小指を立てる<em>NET</em></div>
         <div data-gs="pistol"><span>👉</span>人差し指を横に向け親指を立てる<em>HOOK</em></div>
         <div data-gs="fist"><span>👊</span>拳で腕を勢いよく伸ばす<em>FIST</em></div>
+        <div data-gs="menu"><span>🙌</span>両手を上げて1秒 → 指でボタン操作<em>MENU</em></div>
       </div>
+      <div id="handMenu" hidden></div>
       <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
     </div>
     <div id="camPanel" class="cam-panel" hidden>
@@ -78,6 +80,7 @@
         <button id="help" hidden>? GUIDE</button>
       </div>
     </div>
+    <div id="handTip" hidden role="status"></div>
     <!-- 仮想購入（#22）：案内 → 3・2・1 → 写真の確認 → QR。お金は動かない展示用の体験 -->
     <div id="purchase" hidden>
       <div class="pBox" id="pNotice" hidden>
@@ -107,6 +110,17 @@
         <div class="pBtns"><button id="pErrorClose" type="button">閉じる</button></div>
       </div>
     </div>
+    <!-- 待機画面（人がいない時）：暗くしたライブ映像に、スキャン線・立ち位置のシルエット・案内を重ねる -->
+    <div id="attract" hidden data-state="idle">
+      <div class="at-grid"></div><div class="at-scan"></div>
+      <i class="at-corner c1"></i><i class="at-corner c2"></i><i class="at-corner c3"></i><i class="at-corner c4"></i>
+      <div class="at-ticker"><span>BODY SCAN SYSTEM // <b>STANDBY</b></span><span>SUBJECT: <b id="atSignal">NONE</b></span></div>
+      <div class="at-figure">
+        <svg id="atBones" class="at-bones" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div id="atDots" class="at-dots" aria-hidden="true"></div>
+      </div>
+      <div id="atPrompt" class="at-prompt" role="status"></div>
+    </div>
     <div id="staffConfirm" hidden>
       <b>スタッフ用リセット</b>
       <p>Enterで実行 / Escで取り消し</p>
@@ -134,6 +148,17 @@
     </div>
       <button id="categoryNext" aria-label="次のカテゴリー">›</button>
     </div>
+    <!-- 待機画面のショーケース：商品の画像を順に表示（体験が始まると消える） -->
+    <div id="attractShow" hidden>
+      <div class="store-caption"><span><i></i> PARTS SHOWCASE</span><span>NEW ARRIVALS</span></div>
+      <h2>CHOOSE YOUR<br><strong>NEXT SELF.</strong></h2>
+      <p class="store-help">カメラの前に立つと、このパーツを試着できます。</p>
+      <div class="at-show"><span id="atCat" class="at-cat"></span><img id="atImg" alt="">
+        <div class="at-info"><b id="atName"></b><span id="atDesc"></span></div></div>
+      <div class="at-count"><span id="atCount"></span><span>VIRTUAL STORE / 実際の決済は発生しません</span></div>
+      <div id="atStrip" class="at-strip"></div>
+    </div>
+    <div class="hand-scroll up" data-hand-scroll="up" data-hand-scroll-target="#panel .selection-scroll" aria-hidden="true"><span>▲</span></div>
     <div class="selection-scroll">
     <section id="sec-arms">
       <h3>ARMS <em>// SELECT UPGRADE</em></h3>
@@ -199,6 +224,7 @@
       <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
     </section>
     </div>
+    <div class="hand-scroll down" data-hand-scroll="down" data-hand-scroll-target="#panel .selection-scroll" aria-hidden="true"><span>▼</span></div>
     <div id="btns">
       <button id="apply"><span>装着して体験する<small>INSTALL MODIFICATION</small></span><b aria-hidden="true">↗</b></button>
       <button id="reset"><span aria-hidden="true">↺</span> RESET</button>
@@ -213,6 +239,7 @@
       <label>Sound（効果音・M キー） <input type="checkbox" id="sound" checked></label>
       <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="0.8"></label>
       <label>Room reflections（部屋を映す） <input type="checkbox" id="roomEnv" checked></label>
+      <label>待機画面（人が来たら開始・離れたらリセット） <input type="checkbox" id="attractOn" checked></label>
       <label>Effects quality <select id="fxq"><option value="high">HIGH</option><option value="low">LOW（FPSが低い時）</option></select></label>
     </details>
     <div id="info" role="status">起動中...</div>
