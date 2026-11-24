@@ -21,6 +21,7 @@ export function createExperience() {
     phase: PHASES.SELECT,
     selectedId: DEFAULT_ID,
     appliedId: null,
+    previewId: null,
     requestId: 0,
     startedAt: null,
     muted: false,
@@ -32,7 +33,7 @@ export function reduceExperience(state, event) {
     case EVENTS.SELECT: {
       if (state.phase !== PHASES.SELECT) return state;
       if (typeof event.id !== "string" || event.id === "") return state;
-      return { ...state, selectedId: event.id };
+      return { ...state, selectedId: event.id, previewId: event.id };
     }
 
     case EVENTS.APPLY: {
@@ -66,7 +67,7 @@ export function reduceExperience(state, event) {
 
     case EVENTS.BACK: {
       if (state.phase !== PHASES.ACTION) return state;
-      return { ...state, phase: PHASES.SELECT, appliedId: null };
+      return { ...state, phase: PHASES.SELECT, previewId: state.appliedId, appliedId: null };
     }
 
     case EVENTS.RESET: {
@@ -76,4 +77,11 @@ export function reduceExperience(state, event) {
     default:
       return state;
   }
+}
+
+// 選択中の試着と、装着後のアクションを区別する。初期状態・RESETでは表示しない。
+export function armDisplayMode(state) {
+  if (state.phase === PHASES.ACTION) return 'action';
+  if (state.phase === PHASES.SELECT && state.previewId) return 'preview';
+  return 'none';
 }

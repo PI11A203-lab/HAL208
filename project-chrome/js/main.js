@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { renderArmCards } from './collection.js';
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { loadGLB, loadArmTemplate, createArmView } from "./arms.js";
 import { createRequestTracker, handTip, handBackNormal, assignHands } from "./arm-model.js";
@@ -35,9 +36,10 @@ const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位�
 
 /* ---------------- One Euro フィルター ---------------- */
 import { OneEuro } from './tracking.js';
-import { createExperience, reduceExperience, EVENTS, PHASES } from './experience.js';
+import { createExperience, reduceExperience, armDisplayMode, EVENTS, PHASES } from './experience.js?v=2';
 // 装着音の入口（#15）。腕のギミックの効果音（sfx.js）と名前が重ならないよう別名で読む
 import { unlockAudio as unlockEquipSound, playEquip } from './sound.js';
+import { createCameraInput } from './camera-input.js';
 
 
 /* ---------------- モデルとカメラ ---------------- */
@@ -69,24 +71,13 @@ try {
   info.textContent = "モデルを読み込めませんでした: " + e.message;
   throw e;
 }
-
-try {
-  info.textContent = "カメラの許可を待っています...";
-  video.srcObject = await navigator.mediaDevices.getUserMedia({
-    video: { width: 1280, height: 720 }, audio: false });
-  await video.play();
-} catch (e) {
-  info.textContent = "カメラにアクセスできませんでした: " + e.message;
-  throw e;
-}
-
-const W = video.videoWidth, H = video.videoHeight;
-const hairTracker = createHairTracker(vision);
-skelCanvas.width = W; skelCanvas.height = H;
 info.textContent = "";
-document.getElementById("camdot").className = "on";
-document.getElementById("cam").textContent = "ONLINE"; document.getElementById("cam").className = "ok";
-document.getElementById("camres").textContent = `WEBCAM (${W}×${H})`;
+
+/* ---------------- カメラ（#20） ---------------- */
+// 映像サイズは最初は仮の値。カメラが使えた時に applyVideoSize で実際の値へ合わせる（W/H を固定のまま復帰しない）
+let W = 1280, H = 720, camState = "idle";
+const hairTracker = createHairTracker(vision);
+const cam = createCameraInput({ mediaDevices: navigator.mediaDevices, video, onChange: onCameraChange });
 
 /* ---------------- three.jsシーン ---------------- */
 // 正射影カメラ：1単位＝動画の1ピクセル、y軸は上向き（そのため y = H - y_ピクセル）
@@ -187,7 +178,7 @@ function updateAssembly(now) {
   });
   assemblyFx.sparks.update(frameDt, bodyScale * 4);
   if (!a || armModel.status !== "ready") return;
-  const visible = ARMS.filter(arm => arm.state !== "lost" && armsShown());
+  const visible = ARMS.filter(arm => arm.state !== "lost" && armDisplayMode(exp) === 'action');
   if (a.start === null) {
     if (!visible.length) { armModel.views.forEach(v => v.setAssembly(0)); return; }   // 人が映るまで待つ
     a.start = now;
@@ -219,10 +210,11 @@ function updateAssembly(now) {
   if (t >= total) { armModel.assembly = null; box.style.display = "none"; }
 }
 
-async function useArmModel(id) {
+async function useArmModel(id, { animate = true } = {}) {
   if (armModel.id === id && armModel.status === "ready") {   // 同じモデルは読み直さず外観だけ更新
     armModel.views.forEach(v => v.applyAppearance(design));
-    startAssembly();
+    if (animate) startAssembly();
+    else { armModel.assembly = null; armModel.views.forEach(v => v.setAssembly(null)); }
     say(design.name + " を適用しました。");
     return;
   }
@@ -241,8 +233,13 @@ async function useArmModel(id) {
     views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
     armModel.views = views; armModel.model = model; armModel.status = "ready";
     // 部品は腕の外側・上から飛んでくる（MediaPipe の 12＝本人の右肩は映像の左側）
-    views.forEach((v, i) => v.setAssembly(0, [(ARMS[i].ids[0] === 12 ? -1 : 1) * W * 0.45, H * 0.3, 200]));
-    startAssembly();
+    if (animate) {
+      views.forEach((v, i) => v.setAssembly(0, [(ARMS[i].ids[0] === 12 ? -1 : 1) * W * 0.45, H * 0.3, 200]));
+      startAssembly();
+    } else {
+      armModel.assembly = null;
+      views.forEach(v => v.setAssembly(null));
+    }
     if (views.some(v => v.hasFingers)) ensureHandLandmarker();   // 指の追跡は必要になってから読み込む
     console.info(`腕モデル ${id} を ${Math.round(performance.now() - t0)} ms で読み込みました。`);
     say(design.name + " を適用しました。");
@@ -474,6 +471,7 @@ function startShot(i, power, opened, now, dir, kind = idleKind()) {
 }
 
 function fireGadget(now) {
+  if (armDisplayMode(exp) !== 'action') return;
   if (gadget.kind === "off") { say("GADGET で種類を選んでください。"); return; }
   ARMS.forEach((a, i) => { if (a.state !== "lost") startShot(i, 1, false, now, gadget.curDir[i]); });
 }
@@ -508,8 +506,8 @@ function autoGestures(i, pts, angle, aiming, now) {
 function updateGadget(arm, s, now) {
   const i = ARMS.indexOf(arm), view = gadget.views?.[i];
   // 追跡を失った時は、この腕の溜め・弾・判定を取り消す（画面外にいた時間が溜めに加わらないように）
-  if (!s) resetArmGadget(i);
-  if (!view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
+  if (!s || armDisplayMode(exp) !== 'action') resetArmGadget(i);
+  if (armDisplayMode(exp) !== 'action' || !view || gadget.kind === "off" || !s || armModel.assembly) { view?.setVisible(false); return null; }
   view.setVisible(true);
   const ctrl = gadget.ctrls[i];
   const d = new THREE.Vector3().subVectors(s.wr, s.el);
@@ -552,7 +550,7 @@ function applyShake(dt) {
 // 人差し指だけを立てると、指先に火がつく（手を追跡している時のみ）
 function updateFlame(arm, hand, now) {
   const i = ARMS.indexOf(arm), st = pointing[i];
-  const on = Boolean(hand) && currentLabel[i] === "point";
+  const on = armDisplayMode(exp) === 'action' && Boolean(hand) && currentLabel[i] === "point";
   if (on) { if (st.since === null) st.since = now; } else st.since = null;
   const lit = on && now - st.since >= FLAME.holdSec;
   if (lit && !st.lit) playSfx("flame-ignite", { volume: 0.8 });   // 火が点いた瞬間
@@ -589,7 +587,7 @@ function updateChargeHud() {
   $("chargeval").textContent = c >= 1 ? "MAX" : Math.round(c * 100) + "%";
   // 操作ガイド：AUTO の時だけ表示し、いま認識している手の形を光らせる
   const guide = $("gesturebox");
-  guide.style.display = gadget.kind === "auto" && armsShown() ? "block" : "none";
+  guide.style.display = gadget.kind === "auto" && armDisplayMode(exp) === 'action' ? "block" : "none";
   const seen = new Set(gadget.labels.filter(Boolean));
   if (gadget.ctrls.some(x => x.mode === "charging")) seen.add("open");
   guide.querySelectorAll("[data-gs]").forEach(el => el.classList.toggle("on", seen.has(el.dataset.gs)));
@@ -712,6 +710,11 @@ const earController = createEarController({
   onError: () => { earLoadError = 'GLBが未配置または読込に失敗しました。CLASSICの耳を表示します。OFF→ONで再試行できます。'; },
 });
 function syncEarModel() {
+  document.querySelectorAll('#headCards button').forEach(button => {
+    const active = face.ears && button.dataset.ear === face.earModel;
+    button.classList.toggle('sel', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   // 切替・RESET直後にも旧表示を隠す。次の推論フレームを待たない。
   ears.forEach(ear => { ear.g.visible = false; });
   earController.asset?.roots.forEach(root => { root.visible = false; });
@@ -869,9 +872,8 @@ const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js';
 
 let selected = "mk1", design = DESIGNS.mk1;
-let exp = createExperience(); // APPLYを押すまで腕は表示しない
-// 腕（簡易形状・GLB・ギミック）を表示するのは体験フェーズ（ACTION）の時だけ（#15）
-function armsShown() { return exp.phase === PHASES.ACTION; }
+let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
+function armsShown() { return armDisplayMode(exp) !== 'none'; }
 
 function applyDesign(d) {
   metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
@@ -879,21 +881,23 @@ function applyDesign(d) {
   neonMat.color.setHex(d.neon); neonMat.emissive.setHex(d.neon); neonMat.emissiveIntensity = d.glow;
   design = d;
 }
-function thumb(d) { // 仮の簡易イラスト（実際のモデルではない）
-  const [m, j, n] = d.css;
-  return `<svg viewBox="0 0 60 80"><g transform="rotate(14 30 40)"><rect x="22" y="3" width="16" height="33" rx="8" fill="${m}" stroke="${n}" stroke-opacity=".5"/>` +
-    `<circle cx="30" cy="39" r="7" fill="${j}" stroke="${n}" stroke-width="2"/><rect x="24" y="44" width="12" height="25" rx="6" fill="${m}" stroke="${n}" stroke-opacity=".5"/>` +
-    `<rect x="19" y="67" width="22" height="9" rx="3" fill="${j}" stroke="${n}" stroke-opacity=".6"/></g></svg>`;
-}
 function renderCards() {
-  $("cards").innerHTML = Object.entries(DESIGNS).map(([k, d]) =>
-    `<div class="card ${k === selected ? "sel" : ""}" data-k="${k}">${thumb(d)}<b>${d.name}</b><p>${d.desc}</p><span>${k === selected ? "✓ SELECTED" : "SELECT"}</span></div>`).join("");
-  const d = DESIGNS[selected];
-  $("dname").textContent = d.name; $("ddesc").textContent = d.long;
-  ["str", "spd", "dur"].forEach((id, i) => $(id).style.width = d.stats[i] + "%");
+  renderArmCards(selected);
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
-$("cards").onclick = e => { const c = e.target.closest(".card"); if (c) { selected = c.dataset.k; renderCards(); } };
+$("cards").onclick = e => {
+  const card = e.target.closest('.card');
+  if (!card || card.disabled || exp.phase !== PHASES.SELECT) return;
+  selected = card.dataset.k;
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  applyDesign(DESIGNS[selected]);
+  resetGadgetState();
+  armModel.assembly = null;
+  $("assemblybox").style.display = 'none';
+  if (design.model) useArmModel(design.model, { animate: false });
+  else clearArmModel();
+  renderCards();
+};
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 const EQUIP_MS = 1000;
 let equipTimer = null;
@@ -908,9 +912,10 @@ function syncPhaseUI() {
   $("help").hidden = !action;
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
-  $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+  $("apply").disabled = exp.phase === PHASES.EQUIPPING || camState !== "ready";
 }
 $("apply").onclick = () => {
+  if (camState !== "ready") { say("カメラの準備ができてから装着してください。"); return; }
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
@@ -935,6 +940,9 @@ $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
+  armModel.assembly = null;
+  armModel.views?.forEach(view => view.setAssembly(null));
+  $("assemblybox").style.display = 'none';
   resetGadgetState(); // 溜め・弾・判定・音を持ち越さない
   syncPhaseUI();
   say("装備選択に戻りました。");
@@ -949,6 +957,7 @@ window.addEventListener("keydown", e => {
   else if (e.key === "Escape") setStaffConfirm(false);
 });
 $("showSkel").onchange = e => settings.showSkel = e.target.checked;
+$("showStaff").onchange = e => document.body.classList.toggle('show-staff', e.target.checked);
 $("smooth").oninput = e => settings.smooth = +e.target.value;
 $("depth").oninput = e => settings.depth = +e.target.value;
 $("thick").oninput = e => settings.thick = +e.target.value;
@@ -997,7 +1006,7 @@ function doReset() {
   resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
   setGadgetKind("auto");
   // タブを初期表示（ARMS）へ戻す
-  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x.dataset.t === "arms"));
+  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x.dataset.t === "arms"); x.setAttribute("aria-pressed", String(x.dataset.t === "arms")); });
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
   $("apply").style.display = "";
   syncPhaseUI();
@@ -1008,11 +1017,12 @@ $("gadgetFire").onclick = () => fireGadget(performance.now() / 1000);
 document.addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "g" && !(e.target instanceof HTMLInputElement)) fireGadget(performance.now() / 1000);
 });
+document.querySelectorAll('#panel button, #stage button').forEach(button => { button.disabled = false; });
 renderCards();
 syncPhaseUI();
 setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
 document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
-  document.querySelectorAll(".tab[data-t]").forEach(x => x.classList.toggle("sel", x === t));
+  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x === t); x.setAttribute("aria-pressed", String(x === t)); });
   for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
   $("apply").style.display = "";
 });
@@ -1023,6 +1033,15 @@ $("eyeOp").oninput = e => face.eyeOp = +e.target.value;
 $("eyeMode").onclick = e => { const m = e.target.dataset.m; if (!m) return; face.eyeMode = m; document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b === e.target)); };
 $("ears").onchange = e => { face.ears = e.target.checked; syncEarModel(); };
 $("earModel").onchange = e => { face.earModel = e.target.value; syncEarModel(); };
+$("headCards").onclick = e => {
+  const button = e.target.closest('button[data-ear]');
+  if (!button) return;
+  face.earModel = button.dataset.ear;
+  face.ears = true;
+  $("ears").checked = true;
+  $("earModel").value = face.earModel;
+  syncEarModel();
+};
 $("earLEDCol").oninput = e => { face.earLEDCol = e.target.value; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earLEDOn").onchange = e => { face.earLEDOn = e.target.checked; earController.asset?.applyLED(face.earLEDCol, face.earLEDOn); };
 $("earSize").oninput = e => face.earSize = +e.target.value;
@@ -1038,7 +1057,7 @@ $("earCol").oninput = e => {
 import { createCaptureController, composeFrame, canvasToPngBlob, makeFileName, downloadBlob } from './capture.js';
 const shotCanvas = document.createElement("canvas"); shotCanvas.width = W; shotCanvas.height = H;
 const shotCtx = shotCanvas.getContext("2d");
-const capture = createCaptureController({ isReady: () => video.readyState >= 2 && W > 0 && H > 0 });
+const capture = createCaptureController({ isReady: () => camState === "ready" && W > 0 && H > 0 });
 // 体験中はパネルが隠れるため、案内はボタン自体にも短く表示する
 const CAPTURE_LABEL = $("capture").textContent;
 let captureMsgTimer = null;
@@ -1053,11 +1072,12 @@ $("capture").onclick = () => {
   $("capture").disabled = true;
   captureMsg("撮影中...");
 };
-function endCapture() { capture.finish(); $("capture").disabled = false; }
-function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+function endCapture() { capture.finish(); $("capture").disabled = camState !== "ready"; }
+function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = camState !== "ready"; }
 // renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
 function runCapture() {
   if (!capture.take()) return;
+  if (camState !== "ready") { endCapture(); captureMsg("カメラが停止したため撮影しませんでした"); return; }
   try {
     composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
   } catch (e) {
@@ -1089,11 +1109,100 @@ function updateHud(now) {
   });
 }
 
+/* ---------------- カメラの状態に応じた処理（#20） ---------------- */
+const CAM_MESSAGES = {
+  denied: "カメラの許可がブロックされています。アドレスバーの鍵マークや設定から、このサイトのカメラを「許可」に変えてから再試行してください（再試行だけでは許可は変わりません）。",
+  notFound: "カメラが見つかりません。USBの接続を確認してから再試行してください。",
+  busy: "カメラが他のアプリで使われているか、接続が切れています。他のアプリを閉じるか接続を確認してから再試行してください。",
+  unsupported: "このカメラは要求した解像度などに対応していません。",
+  playback: "カメラの映像を再生できませんでした。再試行してください。",
+  trackEnded: "カメラの接続が切れました。接続を確認してから再試行してください。",
+  videoStopped: "カメラの映像が止まりました。接続を確認してから再試行してください。",
+  unknown: "カメラを開始できませんでした。再試行してください。",
+};
+
+// 映像サイズが決まった時に、サイズに依存するものをすべて揃える（W/H を固定のまま復帰しない）
+function applyVideoSize(w, h) {
+  W = w; H = h;
+  skelCanvas.width = W; skelCanvas.height = H;
+  eyec.width = W; eyec.height = H;
+  shotCanvas.width = W; shotCanvas.height = H;
+  renderer.setSize(W, H, false);
+  camera.right = W; camera.top = H; camera.updateProjectionMatrix();
+  bloom.setSize(W, H);
+  bodyScale = 0.2 * W;
+  hairTracker.reset();
+  resetJoints();
+  ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
+  face.lastSeen = -Infinity;
+  lastVideoTime = -1; lastFrame = null;
+  $("camres").textContent = `WEBCAM (${W}×${H})`;
+}
+
+// 切断・失敗の時に、古い表示を残さない
+function enterCameraLoss() {
+  cancelEquip();
+  cancelCapture();
+  ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
+  clearArmModel();
+  gadget.views?.forEach(v => v.setVisible(false));
+  resetGadgetState();
+  flames.forEach(f => f.reset());
+  ears.forEach(e => { e.g.visible = false; });
+  earController.asset?.roots.forEach(r => { r.visible = false; });
+  ectx.clearRect(0, 0, W, H);
+  skelCtx.clearRect(0, 0, W, H);
+  [0, 1, 2].forEach(i => { $("lbl" + i).style.display = "none"; });
+  $("pose").textContent = "LOST"; $("pose").className = "bad";
+  $("trk").textContent = "LOST";
+  $("pill").className = "bad";
+  $("conf").textContent = "0%"; $("confbar").style.width = "0%";
+  $("fps").textContent = "0";
+  roomEnv.suspend();
+  face.lastSeen = -Infinity;
+  // 体験中は選択へ戻す。装着中は選択へ戻す（experience.js の RESET / BACK の挙動を確認すること）
+  if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK });
+  else if (exp.phase === PHASES.EQUIPPING) exp = reduceExperience(exp, { type: EVENTS.RESET });
+  syncPhaseUI();
+}
+
+function setCamPanel(show, text = "") {
+  $("camPanel").hidden = !show;
+  $("camMsg").textContent = text;
+  $("camRetry").disabled = camState === "starting";
+}
+
+function onCameraChange({ state, reason, width, height }) {
+  camState = state;
+  syncPhaseUI();
+  $("capture").disabled = state !== "ready";
+  if (state === "ready") {
+    applyVideoSize(width, height);
+    $("camdot").className = "on";
+    $("cam").textContent = "ONLINE"; $("cam").className = "ok";
+    roomEnv.resume();
+    setCamPanel(false);
+  } else if (state === "starting") {
+    $("camdot").className = "";
+    $("cam").textContent = "WAIT"; $("cam").className = "";
+    setCamPanel(true, "カメラを準備中です...");
+    } else if (state === "idle") {
+  // 停止（画面からは呼ばない）。案内は出さない
+  $("camdot").className = "";
+  setCamPanel(false);
+  } else {                                   // lost / error
+    enterCameraLoss();
+    $("camdot").className = "";
+    $("cam").textContent = state === "lost" ? "LOST" : "ERROR"; $("cam").className = "bad";
+    setCamPanel(true, CAM_MESSAGES[reason] ?? CAM_MESSAGES.unknown);
+  }
+}
+
 /* ---------------- メインループ ---------------- */
 let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0, lastFrame = null;
 
 function loop() {
-  if (video.currentTime !== lastVideoTime) {
+  if (camState === "ready" && video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     const t0 = performance.now();
     const result = landmarker.detectForVideo(video, t0);
@@ -1118,9 +1227,11 @@ function loop() {
     updateHud(now);
   }
   applyShake(frameDt);
-  if (roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
+  if (camState === "ready" && roomEnv.update()) matchLighting(key, roomEnv.ambient, 0.25);
   bloom.render(scene, camera);
   runCapture();                                               // 描画（ブルーム込み）の直後に撮影する（#11）
   requestAnimationFrame(loop);
 }
+$("camRetry").onclick = () => cam.retry();
+cam.start();
 loop();
