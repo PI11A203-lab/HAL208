@@ -1012,6 +1012,8 @@ const armGlow = createArmGlow({ emissionMat: armEmissionMat });
 const shields = ARMS.map(() => createShieldController());
 const shieldViews = ARMS.map(() => createShield(scene));
 let boostOn = false;
+// 腕が映っていない時のSHIELDボタン用（画面中央に出す。腕が映っていれば使わない）
+const screenShield = createShieldController(), screenShieldView = createShield(scene);
 
 function updateShield(arm, el, wr, hasHand, now) {
   const i = ARMS.indexOf(arm);
@@ -1023,6 +1025,11 @@ function updateShield(arm, el, wr, hasHand, now) {
   shieldViews[i].update(wr.clone().addScaledVector(fd, bodyScale * 0.35), bodyScale * 0.5, r.strength, armLook().neon, now);
 }
 function dropShield(i) { shields[i].reset(); shieldViews[i].hide(); }
+function updateScreenShield(now) {
+  const r = armDisplayMode(exp) === 'action' ? screenShield.update(now, false) : { on: false };
+  if (!r.on) { screenShieldView.hide(); if (armDisplayMode(exp) !== 'action') screenShield.reset(); return; }
+  screenShieldView.update(new THREE.Vector3(W / 2, H / 2, 0), bodyScale * 0.7, r.strength, armLook().neon, now);
+}
 
 function restoreArmGlow() {
   boostOn = false;
@@ -1040,6 +1047,7 @@ function updateArmGlow() {
 // 効果を止めて基準外観へ戻す（phase変更・BACK・RESETで共通）
 function stopGesture() {
   ARMS.forEach((_, i) => dropShield(i));
+  screenShield.reset(); screenShieldView.hide();
   gadget.forceUntil = 0;
   if (boostOn) restoreArmGlow();
 }
@@ -1056,7 +1064,7 @@ function triggerShield() {
   const now = performance.now() / 1000;
   if (armDisplayMode(exp) !== 'action') return;
   const live = ARMS.filter(a => a.state !== "lost");
-  if (!live.length) { say("腕が映ると使えます。"); return; }
+  if (!live.length) { if (!screenShield.force(now)) say("少し待ってからもう一度押してください。"); return; }
   if (!live.map(a => shields[ARMS.indexOf(a)].force(now)).some(Boolean)) say("少し待ってからもう一度押してください。");
 }
 
@@ -1509,6 +1517,7 @@ function loop() {
     updateAssembly(now);
     updateChargeHud();
     updateArmGlow();
+    updateScreenShield(now);
     updateLoops(now);
     updateFace(now);
     drawSkel();
