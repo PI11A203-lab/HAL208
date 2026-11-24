@@ -1,4 +1,4 @@
-import { DESIGNS } from './config.js?v=30-mask-cards';
+import { DESIGNS } from './config.js?v=33-develop-merge';
 
 // 商品の表示はカメラ初期化から独立させる。操作はmain.jsの準備後に有効になる。
 export function renderArmCards(selected, ready = true) {
