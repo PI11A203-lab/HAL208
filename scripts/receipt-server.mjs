@@ -21,21 +21,27 @@ export const isPng = (buf) => Buffer.isBuffer(buf) && buf.length > PNG_MAGIC.len
 // 推測できない受取番号（16バイトの乱数 → URL に使える 22 文字）
 export const newToken = () => randomBytes(16).toString('base64url');
 export const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
+// 展示画面が登録のたびに付ける番号（X-Receipt-Request）。取り消す時にこの番号で消す
+export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
 export function createReceiptStore({ ttlMs = RECEIPT_DEFAULTS.ttlMs, maxItems = RECEIPT_DEFAULTS.maxItems, now = Date.now } = {}) {
-  const items = new Map();   // token → { png, expiresAt }（追加した順）
+  const items = new Map();       // token → { png, expiresAt, requestId }（追加した順）
+  const cancelled = new Map();   // 取り消された登録番号 → 覚えておく期限（登録より先に取り消しが届いた時のため）
   const sweep = () => {
     const t = now();
     for (const [token, item] of items) if (item.expiresAt <= t) items.delete(token);
+    for (const [id, until] of cancelled) if (until <= t) cancelled.delete(id);
   };
   return {
-    add(png) {
+    // 取り消し済みの登録番号なら保存せず null を返す
+    add(png, { requestId = null } = {}) {
       sweep();
+      if (requestId && cancelled.has(requestId)) return null;
       while (items.size >= maxItems) items.delete(items.keys().next().value);
       let token = newToken();
       while (items.has(token)) token = newToken();
       const expiresAt = now() + ttlMs;
-      items.set(token, { png, expiresAt });
+      items.set(token, { png, expiresAt, requestId });
       return { token, expiresAt };
     },
     get(token) {
@@ -45,8 +51,19 @@ export function createReceiptStore({ ttlMs = RECEIPT_DEFAULTS.ttlMs, maxItems = 
       if (item.expiresAt <= now()) { items.delete(token); return null; }
       return item;
     },
+    // 登録番号のレシートを消す。まだ届いていない登録も、後から届いた時に保存しない。消した数を返す
+    cancelRequest(requestId) {
+      if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) return 0;
+      sweep();
+      let removed = 0;
+      for (const [token, item] of items) if (item.requestId === requestId) { items.delete(token); removed++; }
+      cancelled.delete(requestId);
+      cancelled.set(requestId, now() + ttlMs);
+      while (cancelled.size > maxItems * 4) cancelled.delete(cancelled.keys().next().value);
+      return removed;
+    },
     sweep,
-    clear: () => items.clear(),
+    clear: () => { items.clear(); cancelled.clear(); },
     get size() { return items.size; },
   };
 }
@@ -130,19 +147,30 @@ export function createLocalServer({ root, store, receiptBase, maxBytes = RECEIPT
       if (!isLoopback(req.socket.remoteAddress)) return sendText(res, 403, 'Forbidden');
 
       if (url.pathname === '/api/receipts') {
-        if (req.method !== 'POST') return sendText(res, 405, 'Method Not Allowed');
+        if (req.method !== 'POST' && req.method !== 'DELETE') return sendText(res, 405, 'Method Not Allowed');
         // 他のサイトから勝手に送られないよう、同じ展示画面（localhost / 127.0.0.1）からの送信だけ受け付ける
         const origin = req.headers.origin;
         const host = req.headers.host ?? '';
         if (origin && origin !== `http://${host}`) return sendText(res, 403, 'Forbidden');
         if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return sendText(res, 403, 'Forbidden');
+        const requestId = req.headers['x-receipt-request'];
+        if (requestId !== undefined && !REQUEST_ID_RE.test(requestId)) return sendText(res, 400, 'Bad Request');
+        if (req.method === 'DELETE') {
+          // 購入の取り消し：登録済みなら消し、まだなら後から届いた登録を保存しない
+          if (!requestId) return sendText(res, 400, 'Bad Request');
+          const removed = store.cancelRequest(requestId);
+          log(`購入が取り消されたため、レシートを${removed ? '削除しました' : '保存しないようにしました'}（残り ${store.size} 件）`);
+          return send(res, 204, '', { 'Cache-Control': 'no-store' });
+        }
         if ((req.headers['content-type'] ?? '').split(';')[0].trim() !== 'image/png') return sendText(res, 415, 'PNG only');
         if (Number(req.headers['content-length'] ?? 0) > maxBytes) throw Object.assign(new Error('too large'), { status: 413 });
         const body = await readBody(req, maxBytes);
         if (!isPng(body)) return sendText(res, 400, 'PNG only');
         const base = receiptBase();
         if (!base) return sendJson(res, 503, { error: 'LAN に接続されていないため、QR を発行できません。' });
-        const { token, expiresAt } = store.add(body);
+        const added = store.add(body, { requestId: requestId ?? null });
+        if (!added) return sendJson(res, 409, { error: '購入が取り消されたため、レシートは保存しませんでした。' });
+        const { token, expiresAt } = added;
         log(`レシートを登録しました（${Math.round(body.length / 1024)} KB、残り ${store.size} 件）`);
         return sendJson(res, 201, { token, url: `${base}/r/${token}`, expiresAt });
       }
