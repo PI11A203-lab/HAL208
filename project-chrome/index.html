@@ -103,6 +103,18 @@
         <div class="pBtns"><button id="pErrorClose" type="button">閉じる</button></div>
       </div>
     </div>
+    <!-- 待機画面（人がいない時）：暗くしたライブ映像に、スキャン線・立ち位置のシルエット・案内を重ねる -->
+    <div id="attract" hidden data-state="idle">
+      <div class="at-grid"></div><div class="at-scan"></div>
+      <i class="at-corner c1"></i><i class="at-corner c2"></i><i class="at-corner c3"></i><i class="at-corner c4"></i>
+      <div class="at-ticker"><span>BODY SCAN SYSTEM // <b>STANDBY</b></span><span>SUBJECT: <b id="atSignal">NONE</b></span></div>
+      <div class="at-figure">
+        <svg id="atBones" class="at-bones" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div id="atDots" class="at-dots" aria-hidden="true"></div>
+      </div>
+      <div class="at-spot" aria-hidden="true"><span>STAND HERE</span></div>
+      <div id="atPrompt" class="at-prompt" role="status"></div>
+    </div>
     <div id="staffConfirm" hidden>
       <b>スタッフ用リセット</b>
       <p>Enterで実行 / Escで取り消し</p>
@@ -129,6 +141,16 @@
       <div class="tab locked" data-n="SPINE">SPINE<small>SOON</small></div>
     </div>
       <button id="categoryNext" aria-label="次のカテゴリー">›</button>
+    </div>
+    <!-- 待機画面のショーケース：商品の画像を順に表示（体験が始まると消える） -->
+    <div id="attractShow" hidden>
+      <div class="store-caption"><span><i></i> PARTS SHOWCASE</span><span>NEW ARRIVALS</span></div>
+      <h2>CHOOSE YOUR<br><strong>NEXT SELF.</strong></h2>
+      <p class="store-help">カメラの前に立つと、このパーツを試着できます。</p>
+      <div class="at-show"><span id="atCat" class="at-cat"></span><img id="atImg" alt="">
+        <div class="at-info"><b id="atName"></b><span id="atDesc"></span></div></div>
+      <div class="at-count"><span id="atCount"></span><span>VIRTUAL STORE / 実際の決済は発生しません</span></div>
+      <div id="atStrip" class="at-strip"></div>
     </div>
     <div class="selection-scroll">
     <section id="sec-arms">
@@ -209,6 +231,7 @@
       <label>Sound（効果音・M キー） <input type="checkbox" id="sound" checked></label>
       <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="0.8"></label>
       <label>Room reflections（部屋を映す） <input type="checkbox" id="roomEnv" checked></label>
+      <label>待機画面（人が来たら開始・離れたらリセット） <input type="checkbox" id="attractOn" checked></label>
       <label>Effects quality <select id="fxq"><option value="high">HIGH</option><option value="low">LOW（FPSが低い時）</option></select></label>
     </details>
     <div id="info" role="status">起動中...</div>

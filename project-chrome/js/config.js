@@ -119,6 +119,19 @@ export const FLAME = { holdSec: 0.3, size: 1.1 };
 // 炎の連番画像（流体シミュレーションで作成。assets/fx/README.md）。cols×rows コマ、fps：再生速度、base：画像の下から炎の付け根までの割合
 export const FIRE_FLIPBOOK = { url: "./assets/fx/fire-flipbook.jpg", cols: 8, rows: 8, fps: 30, base: 0.12 };
 
+// 待機画面（アトラクトモード）：人がいない時は案内とショーケース、人が来たら開始、離れたらリセット。
+// 値の意味は attract-state.js の ATTRACT_DEFAULTS
+export const ATTRACT_MODE = {
+  enabled: true,
+  enterSec: 1.0,        // この時間カメラの前にいたら始める
+  leaveSec: 8,          // この時間いなかったら終わってリセット
+  holdLeaveSec: 30,     // 購入中（QR の読み取りなど）は長めに待つ
+  goodbyeSec: 2.5,      // 「またのお越しを」の表示時間
+  minShoulder: 0.1,     // 遠すぎる人は数えない（肩幅が映像の幅のこの割合より小さい）
+  centerMargin: 0.15,   // 映像の左右の端にいる人は数えない
+  cycleSec: 4,          // ショーケースの商品を切り替える間隔
+};
+
 // 効果音（assets/sfx/。make-sfx.py で合成したオリジナル）。volume：全体の音量、gain：音ごとの音量の補正
 export const SFX = {
   dir: "./assets/sfx/",

@@ -1003,7 +1003,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js?v=33-develop-merge';
+import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS, ATTRACT_MODE } from './config.js?v=33-develop-merge';
 import {
   APPEARANCE_KEYS, createAppearanceState, selectPreset, editDraft,
   applyDraft, switchDesign, resetAppearance,
@@ -1423,6 +1423,41 @@ function updateHud(now) {
   });
 }
 
+/* ---------------- 待機画面（アトラクトモード） ---------------- */
+// 誰もいない時：暗くしたライブ映像に「カメラの前に立ってください」と立ち位置、右にショーケース。
+// 人が1秒いたら開始（関節が光る→WELCOME）。いなくなって一定時間たったら、スタッフ用リセットと同じ処理をして待機へ戻る
+import { createAttract, presence, ATTRACT_DEFAULTS } from './attract-state.js';
+import { createAttractView } from './attract-ui.js';
+const attract = createAttract(ATTRACT_MODE);
+const attractView = createAttractView({
+  cycleSec: ATTRACT_MODE.cycleSec,
+  items: [
+    ...Object.entries(DESIGNS).map(([key, d]) => ({ category: 'ARMS', name: d.name, desc: d.desc, img: `./assets/shop/${key}.png` })),
+    { category: 'MASK', name: 'PROTOTYPE 04', desc: '機械式ハーフマスク', img: './assets/shop/mask-prototype.png' },
+    { category: 'MASK', name: 'ONI 04 / 鬼面', desc: '赤いLEDと牙のある鬼面', img: './assets/shop/mask-oni.png' },
+    { category: 'MASK', name: 'RABBIT 04 / ウサギ', desc: '白い外装のウサギマスク', img: './assets/shop/mask-rabbit.png' },
+    { category: 'HEAD', name: 'PROTOTYPE 04', desc: '機械式猫耳', img: './assets/shop/cat.png' },
+    { category: 'HEAD', name: 'RABBIT LED', desc: 'LEDウサギ耳', img: './assets/shop/rabbit.png' },
+  ],
+});
+let attractOn = ATTRACT_MODE.enabled;
+$("attractOn").checked = attractOn;
+$("attractOn").onchange = e => {
+  attractOn = e.target.checked;
+  const now = performance.now() / 1000;
+  if (attractOn) attract.reset(now); else attract.skip(now);
+};
+function updateAttract(result, now) {
+  if (!attractOn) { attractView.render('active', 1, now, null); return; }
+  const lm = result.landmarks?.[0] ?? null;
+  // 購入中（QR の読み取りで少し離れる時など）は長めに待つ
+  const seen = presence(lm, { ...ATTRACT_DEFAULTS, ...ATTRACT_MODE });
+  const { state, progress, event } = attract.update({ present: seen.present, hold: Boolean(purchase?.active) }, now);
+  if (event === 'welcome') playSfx("assemble-done", { volume: 0.5 });
+  if (event === 'reset') { setStaffConfirm(false); doReset(); say("待機画面に戻りました。"); }
+  attractView.render(state, progress, now, lm, seen.reason);
+}
+
 /* ---------------- メインループ ---------------- */
 let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0, lastFrame = null;
 
@@ -1435,6 +1470,7 @@ function loop() {
     const now = t0 / 1000;
 
     processFrame(result, now);
+    updateAttract(result, now);
     processBodyFit(result);
     processHands(t0, now);
     if (face.ears || face.eyeMode !== "off" || maskSettings.enabled) processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
