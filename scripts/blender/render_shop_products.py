@@ -44,7 +44,7 @@ for item in items:
     scene.render.image_settings.file_format='PNG'; scene.render.image_settings.color_mode='RGBA'
     scene.view_settings.view_transform='AgX'
     world=bpy.data.worlds.new('Product studio'); scene.world=world; world.use_nodes=True
-    world.node_tree.nodes.get('Background').inputs[0].default_value=(.38,.40,.43,1)
+    next(n for n in world.node_tree.nodes if n.type=='BACKGROUND').inputs[0].default_value=(.38,.40,.43,1)
     for loc,power,size,color in [((-3,-4,5),1100,5,(.92,.96,1)),((4,-1,3),800,3,(1,1,1)),((1,3,4),1300,3,(.8,.9,1))]:
         data=bpy.data.lights.new('Softbox','AREA');data.energy=power;data.shape='DISK';data.size=size;data.color=color
         obj=bpy.data.objects.new('Softbox',data);scene.collection.objects.link(obj);obj.location=loc

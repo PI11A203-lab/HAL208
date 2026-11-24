@@ -99,6 +99,47 @@ test('同梱のGLBに必須ノード・マテリアルがあり、外部ファ�
   }
 });
 
+test('腕3種の配色を保ち、WebとGLBにサテン塗装を適用する', async () => {
+  const palette = {mk1:[0xaab2ba,0x1a1e24,0x00e5ff],neon:[0x0b0f13,0x05080a,0xc40307],titan:[0x8c9097,0x18191c,0xffb300]};
+  for (const [key,design] of Object.entries(DESIGNS)) {
+    assert.deepEqual([design.metal,design.joint,design.neon],palette[key]);
+    const {json} = await readGlbJson(new URL(ARM_MODELS[design.model].url,root));
+    const shell = json.materials.find(mat => mat.name === 'shell');
+    close(shell.pbrMetallicRoughness.roughnessFactor,Math.fround(design.rough),'Webと原本のroughness');
+    assert.ok(shell.pbrMetallicRoughness.metallicFactor < .5);
+    assert.ok(shell.extensions.KHR_materials_clearcoat.clearcoatFactor > .05);
+    if (key === 'neon') {
+      const emission = json.materials.find(mat => mat.name === 'emission');
+      assert.ok(emission.emissiveFactor[0] > emission.emissiveFactor[1]*100);
+      const {json:oni} = await readGlbJson(new URL('assets/models/mask-oni-04-fit.glb',root));
+      const oniLED = oni.materials.find(mat => mat.name === 'MaskLED');
+      assert.deepEqual(emission.pbrMetallicRoughness.baseColorFactor,oniLED.pbrMetallicRoughness.baseColorFactor);
+      for (let i=0;i<3;i++) {
+        assert.ok(Math.abs(emission.emissiveFactor[i]-oniLED.emissiveFactor[i])<1e-7);
+        assert.ok(Math.abs(design.ledLinear[i]*design.glow-oniLED.emissiveFactor[i])<1e-7);
+      }
+      assert.equal(json.nodes.find(node => node.name === 'Hand').extras.handVisualScale,1.1);
+      assert.ok(shell.extensions.KHR_materials_clearcoat.clearcoatFactor > .2);
+      assert.ok(design.envIntensity > 1.5);
+      for (const name of ['NEON forearm central armor','NEON backhand armor','NEON fore recessed mechanisms']) {
+        assert.ok(json.nodes.some(node => node.name === name),name);
+      }
+    }
+  }
+});
+
+test('MK-IとNEONの15指節は長さを保持した太い形状を配布する', async () => {
+  for (const id of ['arm-mk1','arm-neon']) {
+    const {json} = await readGlbJson(new URL(ARM_MODELS[id].url,root));
+    for (const bone of FINGER_BONES) {
+      const node = json.nodes.find(node => node.name === bone.node);
+      assert.equal(node.extras.fingerWidthScale,1.25);
+      assert.equal(node.extras.fingerDepthScale,1.55);
+      assert.ok(node.extras.baseLength > 0 && node.extras.baseRadius > 0);
+    }
+  }
+});
+
 test('手の長さの比率と左右反転の設定が正しい型である', () => {
   for (const [id, model] of Object.entries(ARM_MODELS)) {
     if (model.handRatio !== undefined) {

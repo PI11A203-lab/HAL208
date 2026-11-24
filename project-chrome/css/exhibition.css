@@ -121,6 +121,9 @@ select { background: #0d1d2b; color: #c3deec; border: 1px solid #324e64; padding
 .head-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .head-cards img { display: block; width: 100%; height: 155px; object-fit: contain; transition: transform .25s; }
 .head-cards button span { display: block; padding: 10px 0 2px; border-top: 1px solid #2b4355; font: 10px var(--display); letter-spacing: 1px; }
+.mask-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mask-cards img { height: 108px; }
+.mask-cards button span { min-height: 28px; font-size: 9px; letter-spacing: .2px; }
 .note, .gadget-note { color: #819eaf; font-size: 10px; line-height: 1.8; }
 #info { font-size: 10px; color: #e8b77d; line-height: 1.6; margin-top: 12px; overflow-wrap: anywhere; }
 .phase-action .camera-heading, .phase-action .experience-steps { display: none; }
