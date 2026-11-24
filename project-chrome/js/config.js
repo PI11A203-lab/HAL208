@@ -134,3 +134,19 @@ export const SFX = {
   },
   gain: { "assemble-whir": 0.35, "charge-loop": 0.6, "flame-loop": 1.4, "net-open": 1.3, "thrust-loop": 0.8 },
 };
+
+// 素材の種類（金属 / マット）
+export const MATERIAL_PRESETS = {
+  metal: { label: "メタル", metalness: 0.9, roughness: 0.25 },
+  matte: { label: "マット", metalness: 0.1, roughness: 0.85 },
+};
+
+// 展示用の固定プリセット（designId は上の DESIGNS に存在するものだけ）
+export const DEMO_PRESETS = [
+  { id: "demo-chrome", label: "クロームシルバー", designId: "mk1",
+    appearance: { shellColor: "#aab2ba", jointColor: "#1a1e24", emissionColor: "#00e5ff", metalness: 0.9, roughness: 0.25, glow: 1.2 } },
+  { id: "demo-night", label: "ナイトマット", designId: "neon",
+    appearance: { shellColor: "#0b0f13", jointColor: "#05080a", emissionColor: "#00e5ff", metalness: 0.1, roughness: 0.85, glow: 3.2 } },
+  { id: "demo-amber", label: "アンバーインダストリアル", designId: "titan",
+    appearance: { shellColor: "#3a3d42", jointColor: "#18191c", emissionColor: "#ffb300", metalness: 0.8, roughness: 0.4, glow: 1.6 } },
+];
