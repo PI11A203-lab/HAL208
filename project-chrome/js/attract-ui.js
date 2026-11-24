@@ -1,6 +1,8 @@
 // 待機画面（アトラクトモード）の表示。状態は attract-state.js が決め、ここでは画面を切り替える。
-// ・カメラ：ライブ映像を暗くして、スキャン線・格子・立ち位置のシルエットと「カメラの前に立ってください」を重ねる
-// ・人が来た時：シルエットを薄くし、実際の体の関節（Pose）を光らせて「スキャン中…」
+// ・カメラ：ライブ映像を暗くして、スキャン線・格子と「カメラの前に立ってください」を重ねる。
+//   遠すぎる・画面の端にいる人には「もう少し近づいてください」「中央へ」と案内する
+// ・人が来た時：実際の体の関節（Pose）を光らせて「スキャン中…」
+// ・体験中に人がいなくなった時：終わる前に「まだいますか？ 3・2・1」（戻れば続けられる）
 // ・右のストア：商品の画像を一定時間ごとに切り替えるショーケース
 import { ATTRACT, showcaseIndex } from './attract-state.js';
 
@@ -13,6 +15,12 @@ const PROMPTS = {
     <div class="at-hint">お金はかかりません・映像はこのPCの中だけで処理されます</div>`,
   [ATTRACT.SCANNING]: `<div class="at-jp"><span class="at-ring"></span>スキャン中…</div><div class="at-en">HOLD STILL</div>
     <div class="at-bar"><i></i></div>`,
+  far: `<div class="at-jp">もう少し近づいてください</div><div class="at-en">MOVE CLOSER</div>
+    <div class="at-hint">カメラから 1.5〜2m の位置がおすすめです</div>`,
+  'edge-left': `<div class="at-jp">画面の中央へ移動してください<span class="at-arrow">→</span></div><div class="at-en">MOVE TO CENTER</div>`,
+  'edge-right': `<div class="at-jp"><span class="at-arrow">←</span>画面の中央へ移動してください</div><div class="at-en">MOVE TO CENTER</div>`,
+  warn: `<div class="at-jp">まだいますか？</div><div class="at-count-num"></div>
+    <div class="at-hint">カメラの前に戻ると、そのまま続けられます</div>`,
   [ATTRACT.LEAVING]: `<div class="at-jp">またのお越しをお待ちしています</div><div class="at-en">SEE YOU AGAIN</div>`,
   welcome: `<div class="at-jp">WELCOME</div><div class="at-en">右のストアからパーツを選んでください</div>`,
 };
@@ -82,22 +90,29 @@ export function createAttractView({ doc = document, items = [], cycleSec = 4, we
 
   return {
     // state：ATTRACT の段階、progress：スキャンの進み、lm：Pose の33点（関節を光らせる）、
-    // reason：人の見つかり方（none / far / edge / ok。右上に表示して、立つ位置の目安にする）
-    render(state, progress, now, lm, reason = 'none') {
+    // reason：人の見つかり方（none / far / edge / ok。右上に表示し、待機中は立つ位置を案内する）
+    // side：画面の端にいる時、その人が左右どちらにいるか。countdown：体験中に人がいない時の残り秒（0 なら出さない）
+    render(state, progress, now, lm, reason = 'none', { side = null, countdown = 0 } = {}) {
       if (state !== shown) {
         if (state === ATTRACT.ACTIVE && (shown === ATTRACT.SCANNING)) welcomeUntil = now + welcomeSec;
         shown = state;
       }
       const welcome = state === ATTRACT.ACTIVE && now < welcomeUntil;
-      const visible = state !== ATTRACT.ACTIVE || welcome;
+      const warn = state === ATTRACT.ACTIVE && !welcome && countdown > 0;
+      const visible = state !== ATTRACT.ACTIVE || welcome || warn;
       root.hidden = !visible;
       show.hidden = state === ATTRACT.ACTIVE;
       doc.body.classList.toggle('attract', state === ATTRACT.IDLE || state === ATTRACT.SCANNING || state === ATTRACT.LEAVING);
       if (!visible) return;
       signal.textContent = SIGNAL[reason] ?? 'NONE';
       signal.dataset.reason = reason;
-      root.dataset.state = welcome ? 'welcome' : state;
-      setPrompt(welcome ? 'welcome' : state);
+      root.dataset.state = welcome ? 'welcome' : warn ? 'warn' : state;
+      // 待機中：遠すぎる・端にいる人には立つ位置を案内する
+      let key = welcome ? 'welcome' : warn ? 'warn' : state;
+      if (state === ATTRACT.IDLE && reason === 'far') key = 'far';
+      if (state === ATTRACT.IDLE && reason === 'edge') key = side === 'right' ? 'edge-right' : 'edge-left';
+      setPrompt(key);
+      if (warn) prompt.querySelector('.at-count-num').textContent = String(countdown);
       if (state === ATTRACT.SCANNING) {
         prompt.querySelector('.at-bar i').style.width = `${Math.round(progress * 100)}%`;
         drawJoints(lm);

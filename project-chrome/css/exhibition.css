@@ -228,7 +228,18 @@ body.attract #video { filter: brightness(.38) saturate(.6); transition: filter .
 #attract { position: absolute; inset: 0; z-index: 6; overflow: hidden; pointer-events: none; background: linear-gradient(#0a2a3a40, #04121b80); transition: opacity .5s; }
 #attract[hidden] { display: none; }
 #attract[data-state="welcome"] { background: transparent; }
-#attract[data-state="welcome"] .at-grid, #attract[data-state="welcome"] .at-scan, #attract[data-state="welcome"] .at-figure { display: none; }
+#attract[data-state="welcome"] .at-grid, #attract[data-state="welcome"] .at-scan, #attract[data-state="welcome"] .at-figure , #attract[data-state="warn"] .at-grid, #attract[data-state="warn"] .at-scan, #attract[data-state="warn"] .at-figure { display: none; }
+/* 体験中に人がいなくなった時の警告（ストアはそのまま、映像の上に小さく出す） */
+#attract[data-state="warn"] { background: transparent; }
+#attract[data-state="warn"] .at-ticker { display: none; }
+.at-prompt[data-kind="warn"] { top: 30%; border-color: #ffd54f; }
+.at-count-num { margin-top: 4px; font: 700 clamp(40px, 5vw, 64px)/1 var(--display); color: #ffd54f; text-shadow: 0 0 18px #ffd54f88; }
+/* 立つ位置の案内（遠すぎる・画面の端） */
+.at-prompt[data-kind="far"], .at-prompt[data-kind^="edge"] { border-color: #ffd54f; }
+.at-arrow { display: inline-block; margin: 0 14px; color: #ffd54f; animation: at-nudge 1s ease-in-out infinite; }
+.at-prompt[data-kind="edge-right"] .at-arrow { animation-name: at-nudge-left; }
+@keyframes at-nudge { 50% { transform: translateX(8px); } }
+@keyframes at-nudge-left { 50% { transform: translateX(-8px); } }
 .at-grid { position: absolute; inset: 0; background-image: linear-gradient(#59cfff10 1px, transparent 1px), linear-gradient(90deg, #59cfff10 1px, transparent 1px); background-size: 48px 48px; }
 .at-scan { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, transparent, #7fe3ff, transparent); box-shadow: 0 0 18px 4px #59cfff55; animation: at-scan 3s linear infinite; }
 .at-scan::after { content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 80px; background: linear-gradient(#59cfff00, #59cfff12); }
@@ -276,7 +287,7 @@ body.attract #actionBar, body.attract #gesturebox, body.attract #chargebox { dis
 .at-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(28px, 1fr)); gap: 5px; margin-top: 8px; }
 .at-strip div { aspect-ratio: 1; border: 1px solid #2a3e4b; background: #0c1822 center / contain no-repeat; opacity: .5; transition: opacity .3s, border-color .3s; }
 .at-strip div.on { opacity: 1; border-color: #7fe3ff; box-shadow: 0 0 10px #59cfff55; }
-@media (prefers-reduced-motion: reduce) { .at-scan, .at-ring, .at-show img.kb { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .at-scan, .at-ring, .at-arrow, .at-show img.kb { animation: none; } }
 /* ---- タッチレス操作（#36）：指先カーソル。映像・撮影には入らない ---- */
 .hand-cursor { position: fixed; left: 0; top: 0; z-index: 1000; width: 64px; height: 64px; margin: -32px 0 0 -32px; pointer-events: none; will-change: transform; }
 .hand-cursor[hidden] { display: none; }
@@ -300,3 +311,17 @@ body.hand-pointer-on .hand-scroll.can-scroll span { display: flex; }
 /* 体験中のメニュー切替の案内 */
 #handMenu { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 8px 16px; border: 1px solid #59cfff; background: #08141ce6; color: #cfefff; font: 12px var(--technical, monospace); letter-spacing: 1px; white-space: nowrap; }
 #handMenu[hidden] { display: none; }
+
+/* 初めての来場者向けの操作案内（WELCOME の後・体験の始め） */
+#handTip { position: absolute; left: 50%; bottom: 90px; z-index: 7; transform: translateX(-50%); display: flex; align-items: center; gap: 16px; padding: 14px 22px; background: #06121be6; border: 1px solid #59cfff; clip-path: var(--cut); box-shadow: 0 0 24px #59cfff33; pointer-events: none; white-space: nowrap; animation: ht-in .4s ease-out; }
+#handTip[hidden] { display: none; }
+#handTip b { display: block; font: 700 clamp(14px, 1.5vw, 19px) 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif; color: #eefaff; letter-spacing: 1px; }
+#handTip small { display: block; margin-top: 4px; font: 11px 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif; color: #9fbccb; }
+#handTip .ht-icon { font-size: 30px; animation: ht-raise 1.6s ease-in-out infinite; }
+/* 「ボタンの上で止めるとリングが満ちて選ばれる」を小さく見せる */
+#handTip .ht-demo { position: relative; flex: 0 0 38px; height: 38px; border-radius: 50%; background: conic-gradient(#7fe3ff var(--p, 0%), #b5edff33 0); animation: ht-fill 2s linear infinite; -webkit-mask: radial-gradient(circle, transparent 13px, #000 14px); mask: radial-gradient(circle, transparent 13px, #000 14px); }
+@property --p { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@keyframes ht-fill { 0% { --p: 0%; } 70% { --p: 100%; } 100% { --p: 100%; } }
+@keyframes ht-raise { 50% { transform: translateY(-6px); } }
+@keyframes ht-in { from { opacity: 0; transform: translate(-50%, 10px); } }
+@media (prefers-reduced-motion: reduce) { #handTip, #handTip .ht-icon, #handTip .ht-demo { animation: none; } }

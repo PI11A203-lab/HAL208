@@ -17,10 +17,12 @@ export const ATTRACT_DEFAULTS = Object.freeze({
   leaveSec: 8,           // この時間いなかったら終わる
   holdLeaveSec: 30,      // QR を表示している時などは長めに待つ（スマホで読み取る間に少し離れても続ける）
   goodbyeSec: 2.5,       // 「またのお越しを」を出す時間
+  warnSec: 3,            // 終わる前のこの時間は「まだいますか？ 3・2・1」を出す（戻れば続けられる）
 });
 
-// カメラの前に体験する人がいるか（Pose の33点）。{ present, reason } を返す。
+// カメラの前に体験する人がいるか（Pose の33点）。{ present, reason, side } を返す。
 // reason：'none'（見つからない）| 'far'（遠すぎる）| 'edge'（画面の端）| 'ok'
+// side：その人が画面（鏡映しの表示）の左右どちらにいるか（'left' | 'right'。中央へ案内する向きに使う）
 // 肩が見えていれば肩幅で、肩が映らないほど近い時（PCの前に座っている時など）は顔（耳・目の間隔）で判断する
 export function presence(lm, opts = ATTRACT_DEFAULTS) {
   const ok = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.visibility ?? 1) >= opts.minVis;
@@ -34,16 +36,18 @@ export function presence(lm, opts = ATTRACT_DEFAULTS) {
     else if (ok(lm[2]) && ok(lm[5])) width = dist(lm[2], lm[5]) * 4.5;
     mid = lm[0].x;
   }
-  if (width === null) return { present: false, reason: 'none' };
-  if (width < opts.minShoulder) return { present: false, reason: 'far' };
-  if (mid < opts.centerMargin || mid > 1 - opts.centerMargin) return { present: false, reason: 'edge' };
-  return { present: true, reason: 'ok' };
+  if (width === null) return { present: false, reason: 'none', side: null };
+  const side = 1 - mid <= 0.5 ? 'left' : 'right';   // 映像は鏡映しで表示しているので左右を反転
+  if (width < opts.minShoulder) return { present: false, reason: 'far', side };
+  if (mid < opts.centerMargin || mid > 1 - opts.centerMargin) return { present: false, reason: 'edge', side };
+  return { present: true, reason: 'ok', side };
 }
 
 export const personPresent = (lm, opts = ATTRACT_DEFAULTS) => presence(lm, opts).present;
 
 // 毎フレーム update({ present, hold }, now) を呼ぶ。
-// 戻り値 { state, progress（スキャンの進み 0〜1）, event：'welcome'（始まった）| 'reset'（リセットする）| null }
+// 戻り値 { state, progress（スキャンの進み 0〜1）, event：'welcome'（始まった）| 'reset'（リセットする）| null,
+//          countdown：体験中に人がいない時、終わるまでの残り秒（warnSec 以下の時だけ。それ以外は 0） }
 // hold：長めに待つ時（QR の表示中など）
 export function createAttract(options = {}) {
   const o = { ...ATTRACT_DEFAULTS, ...options };
@@ -65,7 +69,12 @@ export function createAttract(options = {}) {
         else if (now - since >= o.goodbyeSec) { go(ATTRACT.IDLE, now); event = 'reset'; }
       }
       const progress = state === ATTRACT.SCANNING ? Math.min(1, (now - since) / o.enterSec) : state === ATTRACT.IDLE ? 0 : 1;
-      return { state, progress, event };
+      let countdown = 0;
+      if (state === ATTRACT.ACTIVE && !present) {
+        const left = (hold ? o.holdLeaveSec : o.leaveSec) - (now - lastSeen);
+        if (left <= o.warnSec) countdown = Math.max(1, Math.ceil(left));
+      }
+      return { state, progress, event, countdown };
     },
     // スタッフ用：すぐに待機画面へ／すぐに体験中へ
     reset(now = 0) { go(ATTRACT.IDLE, now); lastSeen = -Infinity; },

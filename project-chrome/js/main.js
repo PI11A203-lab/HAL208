@@ -1428,6 +1428,8 @@ function updateHud(now) {
 // 人が1秒いたら開始（関節が光る→WELCOME）。いなくなって一定時間たったら、スタッフ用リセットと同じ処理をして待機へ戻る
 import { createAttract, presence, ATTRACT_DEFAULTS } from './attract-state.js';
 import { createAttractView } from './attract-ui.js';
+import { createHandTips, renderHandTip } from './hand-tips.js';
+const handTips = createHandTips();   // 初めての来場者向けの操作案内（来場者ごとに1回）
 const attract = createAttract(ATTRACT_MODE);
 const attractView = createAttractView({
   cycleSec: ATTRACT_MODE.cycleSec,
@@ -1452,10 +1454,10 @@ function updateAttract(result, now) {
   const lm = result.landmarks?.[0] ?? null;
   // 購入中（QR の読み取りで少し離れる時など）は長めに待つ
   const seen = presence(lm, { ...ATTRACT_DEFAULTS, ...ATTRACT_MODE });
-  const { state, progress, event } = attract.update({ present: seen.present, hold: Boolean(purchase?.active) }, now);
-  if (event === 'welcome') playSfx("assemble-done", { volume: 0.5 });
-  if (event === 'reset') { setStaffConfirm(false); doReset(); say("待機画面に戻りました。"); }
-  attractView.render(state, progress, now, lm, seen.reason);
+  const { state, progress, event, countdown } = attract.update({ present: seen.present, hold: Boolean(purchase?.active) }, now);
+  if (event === 'welcome') { playSfx("assemble-done", { volume: 0.5 }); handTips.welcome(now, 1.4); }   // WELCOME の後に指の案内
+  if (event === 'reset') { setStaffConfirm(false); doReset(); handTips.reset(); say("待機画面に戻りました。"); }
+  attractView.render(state, progress, now, lm, seen.reason, { side: seen.side, countdown });
 }
 
 /* ---------------- タッチレス操作（指先カーソル） #36 ---------------- */
@@ -1504,6 +1506,16 @@ function updateHandPointer(result, now) {
   handCursor.update(point, now);
 }
 
+// 操作案内：体験（ACTION）が始まったらメニューの案内。待機画面・購入の画面の間は出さない
+let tipPhase = exp.phase;
+function updateHandTips(now) {
+  if (exp.phase === PHASES.ACTION && tipPhase !== PHASES.ACTION) handTips.action(now);
+  tipPhase = exp.phase;
+  const tip = handTips.update({ pointer: handPointing, menu: handMenu.active }, now);
+  const blocked = (attractOn && attract.state !== 'active') || Boolean(purchase?.active);
+  renderHandTip($("handTip"), blocked ? null : tip);
+}
+
 /* ---------------- メインループ ---------------- */
 let lastVideoTime = -1, frames = 0, fps = 0, fpsStart = performance.now(), inferMs = 0, lastFrame = null;
 
@@ -1518,6 +1530,7 @@ function loop() {
     processFrame(result, now);
     updateAttract(result, now);
     updateHandPointer(result, now);
+    updateHandTips(now);
     processBodyFit(result);
     processHands(t0, now);
     if (face.ears || face.eyeMode !== "off" || maskSettings.enabled) processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行

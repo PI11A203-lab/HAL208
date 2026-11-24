@@ -127,6 +127,7 @@ export const ATTRACT_MODE = {
   leaveSec: 8,          // この時間いなかったら終わってリセット
   holdLeaveSec: 30,     // 購入中（QR の読み取りなど）は長めに待つ
   goodbyeSec: 2.5,      // 「またのお越しを」の表示時間
+  warnSec: 3,           // 終わる前のこの時間は「まだいますか？ 3・2・1」を出す
   minShoulder: 0.1,     // 遠すぎる人は数えない（肩幅が映像の幅のこの割合より小さい）
   centerMargin: 0.15,   // 映像の左右の端にいる人は数えない
   cycleSec: 4,          // ショーケースの商品を切り替える間隔

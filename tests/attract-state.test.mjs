@@ -28,7 +28,7 @@ test('待機 → 1秒いたら開始（welcome）。途中でいなくなった�
   assert.equal(a.update({ present: false }, 1.6).state, ATTRACT.IDLE);   // 通りがかり
   a.update({ present: true }, 2);
   r = a.update({ present: true }, 3);
-  assert.deepEqual(r, { state: ATTRACT.ACTIVE, progress: 1, event: 'welcome' });
+  assert.deepEqual(r, { state: ATTRACT.ACTIVE, progress: 1, event: 'welcome', countdown: 0 });
   assert.equal(a.update({ present: true }, 3.1).event, null);           // 一度だけ
 });
 
@@ -39,7 +39,7 @@ test('体験中：いなくなって leaveSec たったら「またのお越し�
   assert.equal(a.update({ present: false }, 8.9).state, ATTRACT.ACTIVE);
   assert.equal(a.update({ present: false }, 9).state, ATTRACT.LEAVING);
   assert.equal(a.update({ present: false }, 10).event, null);
-  assert.deepEqual(a.update({ present: false }, 11), { state: ATTRACT.IDLE, progress: 0, event: 'reset' });
+  assert.deepEqual(a.update({ present: false }, 11), { state: ATTRACT.IDLE, progress: 0, event: 'reset', countdown: 0 });
 });
 
 test('「またのお越しを」の間に戻ってきたら、リセットせずに続ける', () => {
@@ -79,12 +79,33 @@ test('近くて肩が映らない時（PCの前に座っている時など）は
     lm[7] = { x: x + earGap / 2, y: 0.38, visibility: vis }; lm[8] = { x: x - earGap / 2, y: 0.38, visibility: vis };
     return lm;
   };
-  assert.deepEqual(presence(face()), { present: true, reason: 'ok' });
-  assert.deepEqual(presence(face(0.5, 0.03)), { present: false, reason: 'far' });
-  assert.deepEqual(presence(face(0.05)), { present: false, reason: 'edge' });
-  assert.deepEqual(presence(null), { present: false, reason: 'none' });
+  assert.deepEqual(presence(face()), { present: true, reason: 'ok', side: 'left' });
+  assert.deepEqual(presence(face(0.5, 0.03)), { present: false, reason: 'far', side: 'left' });
+  assert.deepEqual(presence(face(0.05)), { present: false, reason: 'edge', side: 'right' });
+  assert.deepEqual(presence(null), { present: false, reason: 'none', side: null });
   // 耳が見えない時は目の間隔で
   const eyes = face(); eyes[7].visibility = 0; eyes[2] = { x: 0.53, y: 0.36, visibility: 1 }; eyes[5] = { x: 0.47, y: 0.36, visibility: 1 };
   assert.equal(presence(eyes).present, true);
-  assert.deepEqual(presence(pose()), { present: true, reason: 'ok' });
+  assert.equal(presence(pose()).reason, 'ok');
+});
+
+test('画面の端にいる人：画面（鏡映し）のどちら側にいるかを返す', () => {
+  // 映像の左端（x が小さい）にいる人は、鏡映しの画面では右側に見える
+  assert.equal(presence(pose(0.08)).side, 'right');
+  assert.equal(presence(pose(0.92)).side, 'left');
+  assert.equal(presence(pose(0.92)).reason, 'edge');
+});
+
+test('終わる前の警告：いなくなって leaveSec−warnSec を過ぎたら 3・2・1、戻ったら消える', () => {
+  const a = createAttract({ enterSec: 1, leaveSec: 8, warnSec: 3 });
+  a.update({ present: true }, 0); a.update({ present: true }, 1);
+  assert.equal(a.update({ present: false }, 5.9).countdown, 0);
+  assert.equal(a.update({ present: false }, 6).countdown, 3);
+  assert.equal(a.update({ present: false }, 7.2).countdown, 2);
+  assert.equal(a.update({ present: false }, 8.5).countdown, 1);
+  assert.equal(a.update({ present: true }, 8.6).countdown, 0);       // 戻ってきた
+  assert.equal(a.update({ present: true }, 8.6).state, ATTRACT.ACTIVE);
+  // 購入中は長い時間に合わせて、最後の3秒だけ
+  assert.equal(a.update({ present: false, hold: true }, 30).countdown, 0);
+  assert.equal(a.update({ present: false, hold: true }, 36.1).countdown, 3);
 });
