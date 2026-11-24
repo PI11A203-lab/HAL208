@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Project Chrome</title>
 <!-- Project Chrome 試作版（フェーズ5）：Webカメラで体を追跡し、サイバネティックな腕・猫耳・目のエフェクトを重ねて表示します。映像はこのPC内だけで処理されます。 -->
 <link rel="stylesheet" href="./css/style.css">
+<link rel="stylesheet" href="./css/exhibition.css?v=33-develop-merge">
 
 <script type="importmap">
 { "imports": {
@@ -15,14 +16,28 @@
 </script>
 </head>
 <body>
+<div id="storeIntro" class="store-intro" role="dialog" aria-modal="true" aria-label="PROJECT CHROME 起動シーケンス">
+  <div class="intro-grid" aria-hidden="true"></div>
+  <svg class="intro-circuit" viewBox="0 0 1600 900" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="currentColor"><path class="trace trace-a" d="M55 295V70L95 30H330L365 65H950L980 35H1460L1550 125V735L1480 805H1190L1160 840H445L410 805H100L55 760V555"/><path class="trace trace-b" d="M95 290V115L130 80H290L325 115H905L955 65H1420L1510 155V700L1450 760H1170L1130 800H475L435 760H130L95 725V590"/><path class="trace trace-c" d="M370 160H970L1020 210V315L1060 355V545L1020 585V700H450L370 620Z"/><path d="M30 340H70L100 370V530L70 560H30M1540 320H1490L1450 360V520L1490 560H1540M1240 120H1380L1445 185V225M1310 710H1400L1460 650"/><path class="trace-detail" d="M1160 258H1190L1208 276M1160 270H1190L1208 288M1160 282H1190L1208 300M420 732H570M420 742H540"/></g></svg>
+  <div class="armor-door door-left" aria-hidden="true"><div class="armor-edge"></div><span class="panel-serial">PC // 208 — ACCESS MODULE</span><div class="panel-slots"></div><i class="panel-bolt bolt-top"></i><i class="panel-bolt bolt-bottom"></i></div>
+  <div class="armor-door door-right" aria-hidden="true"><div class="armor-edge"></div><span class="panel-serial">CYBERWARE SYSTEM / 2126</span><div class="panel-slots"></div><i class="panel-bolt bolt-top"></i><i class="panel-bolt bolt-bottom"></i></div>
+  <div class="intro-top"><span><i></i> PROJECT CHROME / STORE ACCESS</span><span>HAL208 — EXHIBITION SYSTEM</span></div>
+  <div class="intro-identity"><span class="intro-code">PERSONAL CYBERNETICS / 01</span><span class="intro-outline" aria-hidden="true">CHROME</span><h1>CHROME<span>®</span></h1><p>YOUR NEXT BODY STARTS HERE.</p><div class="access-status"><span class="access-light"></span><span id="introStatus">ACCESSING STORE</span><span class="intro-dots" aria-hidden="true">•••</span></div><div class="intro-progress"><i></i></div><span class="intro-caption">サイバネティック・パーツストアへようこそ</span></div>
+  <div class="intro-left-rail" aria-hidden="true">SECURE ACCESS ━━━━━━━━━━━</div><div class="intro-right-rail" aria-hidden="true">BODY MODIFICATION / ONLINE STORE</div>
+  <div class="intro-orb" aria-hidden="true"><i></i><i></i><i></i><b>+</b></div><div class="intro-lock" aria-hidden="true"><span>↗</span><small>LINK<br>ESTABLISHED</small></div>
+  <div class="intro-bottom"><span>LOCAL EXPERIENCE / NO PAYMENT</span><button id="skipIntro">SKIP SEQUENCE <b>↗</b></button></div>
+</div>
 <header>
-  <div class="logo"><b>«</b> PROJECT CHROME</div>
+  <div class="logo"><span class="brand-mark" aria-hidden="true">C<span>+</span></span><div><span class="brand-word">CHROME<span>®</span></span><small>PERSONAL CYBERNETICS / HAL208</small></div></div>
   <div class="status">
     <span><i id="camdot"></i>CAMERA <b id="cam" class="bad">OFFLINE</b></span>
     <span>POSE TRACKING: <b id="pose" class="bad">LOST</b></span>
   </div>
 </header>
-<main>
+<main id="exhibitionMain">
+  <div class="camera-column">
+  <div class="camera-heading"><span><i></i> LIVE FITTING <small>/ 01</small></span><span>PERSONAL AUGMENTATION BAY</span></div>
+  <div class="camera-frame">
   <section id="stage">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="eyec"></canvas>
@@ -33,7 +48,16 @@
         <div class="big"><span id="conf">0%</span></div><div class="bar"><i id="confbar"></i></div>
         <small>CAMERA: <span id="camres">-</span><br>FPS: <span id="fps">0</span><br>HAND: <span id="handms">-</span> ms</small></div>
       <div class="lbl" id="lbl0"></div><div class="lbl" id="lbl1"></div><div class="lbl" id="lbl2"></div>
-      <div id="gestureBox">HAND GESTURE <b id="gState">-</b><div class="bar"><i id="gBar"></i></div></div>
+      <div id="chargebox">CHARGE <b id="chargeval">0%</b><div class="bar"><i id="chargebar"></i></div></div>
+      <div id="assemblybox"></div>
+      <div id="gesturebox"><b>ARM CONTROL</b>
+        <div data-gs="point"><span>☝️</span>人差し指だけを上へ立てる<em>FLAME</em></div>
+        <div data-gs="open"><span>✋</span>腕を上げて手を開く → 握る<em>PLASMA</em></div>
+        <div data-gs="spider"><span>🤟</span>人差し指と小指を立てる<em>NET</em></div>
+        <div data-gs="pistol"><span>👉</span>人差し指を横に向け親指を立てる<em>HOOK</em></div>
+        <div data-gs="fist"><span>👊</span>拳で腕を勢いよく伸ばす<em>FIST</em></div>
+      </div>
+      <div id="handStateBox">HAND GESTURE <b id="gState">-</b><div class="bar"><i id="gBar"></i></div></div>
       <div id="pill" class="bad"><i></i>TRACKING <b id="trk">LOST</b></div>
     </div>
     <div id="actionBar">
@@ -47,11 +71,41 @@
         </ul>
       </div>
       <div class="actionBtns">
-        <button id="capture">📷 撮影してPNG保存</button>
+        <button id="buy" hidden>🛒 この装備を購入（体験）</button>
+        <button id="capture" title="装備をつけた映像をPNGで保存">写真を撮る</button>
         <button id="gCharge" hidden>⚡ CHARGE</button>
         <button id="gShield" hidden>🛡 SHIELD</button>
         <button id="back" hidden>← BACK TO SELECT</button>
         <button id="help" hidden>? GUIDE</button>
+      </div>
+    </div>
+    <!-- 仮想購入（#22）：案内 → 3・2・1 → 写真の確認 → QR。お金は動かない展示用の体験 -->
+    <div id="purchase" hidden>
+      <div class="pBox" id="pNotice" hidden>
+        <b>VIRTUAL PURCHASE</b>
+        <p>この装備を「購入」した記念に写真を撮り、<br>写真入りのレシートをスマホで受け取れます。</p>
+        <p class="pFree">展示用の体験です。お金はかかりません（決済は発生しません）。</p>
+        <div class="pBtns"><button id="pNoticeCancel" type="button">やめる</button><button id="pStart" type="button" class="pMain">撮影へ進む</button></div>
+      </div>
+      <div id="pCount" hidden><span id="pCountNum">3</span><small>ポーズを決めてください</small></div>
+      <div class="pBox" id="pPreview" hidden>
+        <b>この写真で購入しますか？</b>
+        <img id="pImg" alt="撮影した写真">
+        <div class="pBtns"><button id="pPreviewCancel" type="button">やめる</button><button id="pRetake" type="button">撮り直す</button><button id="pConfirm" type="button" class="pMain">この写真で購入</button></div>
+      </div>
+      <div class="pBox" id="pBusy" hidden><b>レシートを準備しています…</b></div>
+      <div class="pBox" id="pQr" hidden>
+        <b>ご購入ありがとうございました</b>
+        <canvas id="pQrCanvas" width="280" height="280"></canvas>
+        <p>スマホのカメラで読み取ると、レシートを保存できます。<br>（この展示と同じ Wi-Fi に接続してください）</p>
+        <p class="pFree">展示用・決済は発生しません</p>
+        <small id="pQrTime"></small>
+        <div class="pBtns"><button id="pDone" type="button" class="pMain">終了</button></div>
+      </div>
+      <div class="pBox pErr" id="pError" hidden>
+        <b>うまくいきませんでした</b>
+        <p id="pErrorMsg"></p>
+        <div class="pBtns"><button id="pErrorClose" type="button">閉じる</button></div>
       </div>
     </div>
     <div id="staffConfirm" hidden>
@@ -59,17 +113,29 @@
       <p>Enterで実行 / Escで取り消し</p>
     </div>
   </section>
+  </div>
+  <div class="experience-steps"><div><b>01</b><span>SELECT<small>パーツを選ぶ</small></span></div><i>→</i><div><b>02</b><span>INSTALL<small>装着してみる</small></span></div><i>→</i><div><b>03</b><span>EXPERIENCE<small>動かして体験</small></span></div><button id="replayIntro" aria-label="入店アニメーションを再生">↺</button></div>
+  <p class="camera-footnote">カメラの前に立ち、右のストアからパーツを選んでください。<span>VIRTUAL STORE / 実際の決済は発生しません。</span></p>
+  </div>
   <aside id="panel">
-    <h2>CYBERWARE <em>// LOADOUT</em></h2>
-    <div id="tabs">
-      <div class="tab sel" data-t="arms">ARMS</div>
-      <div class="tab" data-t="eyes">EYES</div>
-      <div class="tab" data-t="head">HEAD</div>
+    <div class="store-caption"><span><i></i> PARTS TERMINAL</span><span>COLLECTION / 01</span></div>
+    <h2>CHOOSE YOUR<br><strong>NEXT SELF.</strong><span class="heading-cross" aria-hidden="true">+</span></h2>
+    <p class="store-help">パーツを選ぶと、映像で試着できます。</p>
+    <div class="category-nav" aria-label="装備カテゴリー">
+      <button id="categoryPrev" aria-label="前のカテゴリー" disabled>‹</button>
+    <div id="tabs" role="tablist" aria-label="装備カテゴリー">
+      <button class="tab sel" data-t="arms" role="tab" id="tab-arms" aria-controls="sec-arms" aria-selected="true"><small>01</small> ARMS</button>
+      <button class="tab" data-t="eyes" role="tab" id="tab-eyes" aria-controls="sec-eyes" aria-selected="false" tabindex="-1"><small>02</small> EYES</button>
+      <button class="tab" data-t="mask" role="tab" id="tab-mask" aria-controls="sec-mask" aria-selected="false" tabindex="-1"><small>03</small> MASK</button>
+      <button class="tab" data-t="head" role="tab" id="tab-head" aria-controls="sec-head" aria-selected="false" tabindex="-1"><small>04</small> HEAD</button>
       <div class="tab locked" data-n="HAIR">HAIR<small>SOON</small></div>
       <div class="tab locked" data-n="LEGS">LEGS<small>SOON</small></div>
       <div class="tab locked" data-n="BACK">BACK<small>SOON</small></div>
       <div class="tab locked" data-n="SPINE">SPINE<small>SOON</small></div>
     </div>
+      <button id="categoryNext" aria-label="次のカテゴリー">›</button>
+    </div>
+    <div class="selection-scroll">
     <section id="sec-arms">
       <h3>ARMS <em>// SELECT UPGRADE</em></h3>
       <div id="cards"></div>
@@ -77,6 +143,11 @@
         <div><b id="dname"></b><p id="ddesc"></p></div>
         <div class="stats"><div>STRENGTH<u><i id="str"></i></u></div><div>SPEED<u><i id="spd"></i></u></div><div>DURABILITY<u><i id="dur"></i></u></div></div>
       </div>
+      <details class="gadget-options"><summary>GADGET // アクション設定</summary>
+      <div class="seg" id="gadgetMode"><button data-g="off">OFF</button><button data-g="auto" class="sel">AUTO</button><button data-g="plasma">PLASMA</button><button data-g="net">NET</button><button data-g="hook">HOOK</button><button data-g="fist">FIST</button></div>
+      <button id="gadgetFire" class="gadget-fire">▶ FIRE（テスト）</button>
+      <p class="gadget-note">AUTO：手の形と動きでギミックが変わります（操作ガイドを画面左下に表示）。種類を1つ選んだ時は、腕をまっすぐ伸ばして肩の高さより上に向けると溜まり、腕を下ろすか拳を開くと発射します。FIRE・Gキーはテスト用です。人差し指だけを立てると指先に火がつきます。</p>
+      </details>
     </section>
     <section id="sec-eyes" hidden>
       <h3>EYES <em>// LENS &amp; IMPLANT</em></h3>
@@ -86,8 +157,24 @@
       <label>Opacity <input type="range" id="eyeOp" min="0.2" max="1" step="0.05" value="0.85"></label>
       <p class="note">LENS：虹彩の模様と瞳孔を残したまま色だけを変えます（カラーコンタクト風）。CYBER：機械式の発光アイ。カメラに近いほど精度が上がります。</p>
     </section>
+    <section id="sec-mask" role="tabpanel" aria-labelledby="tab-mask" hidden>
+      <h3>MASK <em>// FACIAL ARMOR</em></h3>
+      <div id="maskCards" class="head-cards mask-cards" role="group" aria-label="マスクを選択">
+        <button type="button" data-mask="prototype" aria-pressed="false"><img src="./assets/shop/mask-prototype.png" alt="機械式ハーフマスク"><span>PROTOTYPE 04</span></button>
+        <button type="button" data-mask="oni" aria-pressed="false"><img src="./assets/shop/mask-oni.png" alt="赤いLEDと牙のある鬼面"><span>ONI 04 / 鬼面</span></button>
+        <button type="button" data-mask="rabbit" aria-pressed="false"><img src="./assets/shop/mask-rabbit.png" alt="白い外装のウサギマスク"><span>RABBIT 04 / ウサギ</span></button>
+      </div>
+      <label>マスクを装着 <input type="checkbox" id="maskOn"></label>
+      <p class="note" id="maskStatus" role="status">ONにすると機械式ハーフマスクを試着できます。</p>
+      <label>Armor color <input type="color" id="maskCol" value="#35383b"></label>
+      <label>サイズ <input type="range" id="maskSize" min="0.8" max="1.3" step="0.01" value="1"></label>
+      <label>高さ（＋で上）<input type="range" id="maskLift" min="-0.2" max="0.2" step="0.01" value="-0.05"></label>
+      <label>奥行き（＋で手前）<input type="range" id="maskDepth" min="-0.15" max="0.2" step="0.01" value="0"></label>
+      <p class="note">鼻と顎、左右の頬に合わせて追従します。顔を正面に向けてONにし、必要なら位置を調整してください。目・耳・腕と一緒に使えます。</p>
+    </section>
     <section id="sec-head" hidden>
       <h3>HEAD <em>// IMPLANTS</em></h3>
+      <div id="headCards" class="head-cards"><button data-ear="glb"><img src="./assets/shop/cat.png" alt="機械式猫耳"><span>PROTOTYPE 04</span></button><button data-ear="rabbit"><img src="./assets/shop/rabbit.png" alt="LEDウサギ耳"><span>RABBIT LED</span></button></div>
       <label>Ears (耳を装着) <input type="checkbox" id="ears"></label>
       <label>Ear model <select id="earModel"><option value="classic">CLASSIC</option><option value="glb">PROTOTYPE 04 (Blender)</option><option value="rabbit">RABBIT LED (Blender)</option></select></label>
       <div id="earLEDControls" hidden>
@@ -101,21 +188,29 @@
       <p class="note" id="earFitStatus" role="status">装着位置：髪の輪郭を基準に配置します。</p>
       <label>Ear color <input type="color" id="earCol" value="#1b1f25"></label>
     </section>
+    </div>
     <div id="btns">
-      <button id="apply">APPLY MODIFICATION</button>
-      <button id="reset">↺ RESET</button>
+      <button id="apply"><span>装着して体験する<small>INSTALL MODIFICATION</small></span><b aria-hidden="true">↗</b></button>
+      <button id="reset"><span aria-hidden="true">↺</span> RESET</button>
     </div>
     <details>
-      <summary>TRACKING SETTINGS</summary>
+      <summary>スタッフ用設定 / SYSTEM</summary>
+      <label>計測情報を表示 <input type="checkbox" id="showStaff"></label>
       <label>Skeleton overlay <input type="checkbox" id="showSkel"></label>
       <label>Smoothing <input type="range" id="smooth" min="0" max="1" step="0.05" value="0.5"></label>
       <label>Depth effect <input type="range" id="depth" min="0" max="1" step="0.05" value="0.5"></label>
       <label>Arm thickness <input type="range" id="thick" min="0.6" max="1.8" step="0.05" value="1"></label>
+      <label>Sound（効果音・M キー） <input type="checkbox" id="sound" checked></label>
+      <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="0.8"></label>
+      <label>Room reflections（部屋を映す） <input type="checkbox" id="roomEnv" checked></label>
+      <label>Effects quality <select id="fxq"><option value="high">HIGH</option><option value="low">LOW（FPSが低い時）</option></select></label>
     </details>
-    <div id="info">起動中...</div>
+    <div id="info" role="status">起動中...</div>
   </aside>
 </main>
 
-<script type="module" src="./js/main.js"></script>
+<script type="module" src="./js/intro.js"></script>
+<script type="module" src="./js/collection.js"></script>
+<script type="module" src="./js/main.js?v=33-develop-merge"></script>
 </body>
 </html>
