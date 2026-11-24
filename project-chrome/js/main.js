@@ -134,9 +134,12 @@ const camBaseX = camera.position.x, camBaseY = camera.position.y;
 const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
 /* ---------------- ロボットアームモデル ---------------- */
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.4, roughness: 0.38 });
-const jointMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
-const neonMat  = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
+// 腕専用マテリアル（shell / joint / emission の3スロット）。猫耳とは共有しない。
+// 左右の腕は同じ3つのmaterialを共有する（色変更が左右に同時に反映される）。
+// 色・質感は applyAppearanceToMaterials() が appState.applied から更新する（materialは作り直さない）。
+const armShellMat    = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.4, roughness: 0.38 });
+const armJointMat    = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
+const armEmissionMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 
 // 円柱：先端（+Y側）をやや細くし、腕の先に向かって細くなる形にする
 const cylGeo = new THREE.CylinderGeometry(0.8, 1, 1, 32);
@@ -147,13 +150,13 @@ const torusGeo = new THREE.TorusGeometry(1, 0.08, 12, 48);
 function makeArm(name, ids, handIds) {
   const g = new THREE.Group();
   const m = {
-    shoulder: new THREE.Mesh(sphereGeo, jointMat),
-    upper: new THREE.Mesh(cylGeo, metalMat),
-    elbow: new THREE.Mesh(sphereGeo, jointMat),
-    fore: new THREE.Mesh(cylGeo, metalMat),
-    hand: new THREE.Mesh(boxGeo, metalMat),
-    ring1: new THREE.Mesh(torusGeo, neonMat),
-    ring2: new THREE.Mesh(torusGeo, neonMat),
+    shoulder: new THREE.Mesh(sphereGeo, armJointMat),
+    upper: new THREE.Mesh(cylGeo, armShellMat),
+    elbow: new THREE.Mesh(sphereGeo, armJointMat),
+    fore: new THREE.Mesh(cylGeo, armShellMat),
+    hand: new THREE.Mesh(boxGeo, armShellMat),
+    ring1: new THREE.Mesh(torusGeo, armEmissionMat),
+    ring2: new THREE.Mesh(torusGeo, armEmissionMat),
   };
   Object.values(m).forEach(mesh => g.add(mesh));
   g.visible = false;
@@ -246,7 +249,7 @@ function updateAssembly(now) {
 
 async function useArmModel(id, { animate = true } = {}) {
   if (armModel.id === id && armModel.status === "ready") {   // 同じモデルは読み直さず外観だけ更新
-    armModel.views.forEach(v => v.applyAppearance(design));
+    armModel.views.forEach(v => v.applyAppearance(armLook()));
     if (animate) startAssembly();
     else { armModel.assembly = null; armModel.views.forEach(v => v.setAssembly(null)); }
     say(design.name + " を適用しました。");
@@ -264,7 +267,7 @@ async function useArmModel(id, { animate = true } = {}) {
     // MediaPipe の 11-13-15 は本人の左腕。右腕として作ったモデルは左腕で左右反転する
     const views = ARMS.map(arm => createArmView(template, model, { mirror: Boolean(model.mirrorLeft) && arm.ids[0] === 11 }));
     armModel.views?.forEach(v => v.dispose());
-    views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
+    views.forEach(v => { v.applyAppearance(armLook()); scene.add(v.root); });
     armModel.views = views; armModel.model = model; armModel.status = "ready";
     // 部品は腕の外側・上から飛んでくる（MediaPipe の 12＝本人の右肩は映像の左側）
     if (animate) {
@@ -499,7 +502,7 @@ async function setGadgetKind(kind) {
     const template = await loadArmTemplate(GADGET.url);
     if (!gadget.requests.isCurrent(request)) return;
     gadget.views = ARMS.map(() => createGadgetView(template, { onEvent: gadgetSound }));
-    gadget.views.forEach(v => { v.applyAppearance(design); scene.add(v.root); });
+    gadget.views.forEach(v => { v.applyAppearance(armLook()); scene.add(v.root); });
   } catch (e) {
     if (!gadget.requests.isCurrent(request)) return;
     console.warn("ギミックのモデルを読み込めませんでした。", e);
@@ -761,9 +764,11 @@ const fp = {}; // 平滑化した顔の点（ピクセル空間）
 for (const id of FIDS) fp[id] = { f: [new OneEuro(), new OneEuro(), new OneEuro()], p: new THREE.Vector3() };
 
 /* --- 3D猫耳：外殻（面取り付きの金属プレート）＋内側の発光パネル＋根元のカラー＋発光ライン --- */
+// 猫耳専用マテリアル。腕のマテリアルとは共有しない（腕の外観変更が猫耳に影響しないようにするため）。
 const earMat = new THREE.MeshStandardMaterial({ color: 0x1b1f25, metalness: 0.9, roughness: 0.3 });
 const earInMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.4 });
-const earJointMat = jointMat.clone(), earNeonMat = neonMat.clone();
+const earCollarMat = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
+const earSeamMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 const outerGeo = new THREE.ExtrudeGeometry(earShape(1), { depth: 0.16, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 14 });
 outerGeo.translate(0, 0, -0.13);   // 厚みの中心を z=0 に合わせる
 const innerGeo = new THREE.ExtrudeGeometry(earShape(0.6), { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 14 });
@@ -771,7 +776,7 @@ innerGeo.translate(0, 0.09, 0.07); // 外殻の前面からわずかに突き出
 const ears = [0, 1].map(() => {
   const g = new THREE.Group();
   const p = { g, shell: new THREE.Mesh(outerGeo, earMat), inner: new THREE.Mesh(innerGeo, earInMat),
-              collar: new THREE.Mesh(cylGeo, earJointMat), seam: new THREE.Mesh(boxGeo, earNeonMat) };
+              collar: new THREE.Mesh(cylGeo, earCollarMat), seam: new THREE.Mesh(boxGeo, earSeamMat) };
   g.add(p.shell, p.inner, p.collar, p.seam); g.visible = false; scene.add(g);
   return p;
 });
@@ -998,23 +1003,103 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS } from './config.js?v=33-develop-merge';
+import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js?v=33-develop-merge';
+import {
+  APPEARANCE_KEYS, createAppearanceState, selectPreset, editDraft,
+  applyDraft, switchDesign, resetAppearance,
+} from './appearance.js';
 
+// 外観の状態は appState ひとつ。画面の表示は renderAppearance() がここから描き直す。
+//   appState.draft   : 編集中の値（APPLYするまで腕に反映しない）
+//   appState.applied : 腕に反映済みの値
+let appState = createAppearanceState(DESIGNS, DEMO_PRESETS, "mk1");
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
 let purchase = null;          // 仮想購入の画面（#22）。下の「仮想購入」で作る
 function armsShown() { return armDisplayMode(exp) !== 'none'; }
 
-function applyDesign(d) {
-  metalMat.color.setHex(d.metal); metalMat.roughness = d.rough;
-  jointMat.color.setHex(d.joint);
-  neonMat.color.setHex(d.neon); neonMat.emissive.setHex(d.neon); neonMat.emissiveIntensity = d.glow;
-  design = d;
+// GLBの腕・ギミックに渡す外観。デザインの値に、いま腕に見せている外観を重ねて返す。
+// armAppearance：試着中はそのデザインの既定値、APPLY後は装着した値。
+// 読込が遅れて完了した時も、その時点で見せるべき外観になる。
+let armAppearance = appState.applied;
+const hexNum = s => parseInt(s.slice(1), 16);
+function armLook() {
+  const a = armAppearance;
+  // その装備の既定の外観と比べ、画面で「変えた項目」だけを上書きする。
+  // 変えていない項目は、デザイン（サテン仕上げ・NEONの赤色LEDなど）の見た目のままにする。
+  const id = Object.keys(DESIGNS).find(k => DESIGNS[k] === design);
+  const base = switchDesign(appState, id).draft;
+  const look = { ...design };
+  if (a.shellColor !== base.shellColor) look.metal = hexNum(a.shellColor);
+  if (a.jointColor !== base.jointColor) look.joint = hexNum(a.jointColor);
+  if (a.emissionColor !== base.emissionColor) { look.neon = hexNum(a.emissionColor); look.ledLinear = null; }   // 赤色LED指定より画面の色を優先
+  if (a.roughness !== base.roughness) look.rough = a.roughness;
+  if (a.metalness !== base.metalness) look.metalness = a.metalness;
+  if (a.glow !== base.glow) look.glow = a.glow;
+  return look;
 }
+
+// カードで試着する時に呼ぶ。デザインを切り替え、編集値(draft)をそのデザインの既定値にし、
+// 試着中の見た目として腕のマテリアルへ反映する。装着中の外観(applied)はAPPLYするまで変えない。
+function applyDesign(d) {
+  design = d;
+  const id = Object.keys(DESIGNS).find(k => DESIGNS[k] === d);
+  const sw = switchDesign(appState, id);
+  appState = { ...appState, draft: sw.draft, presetId: null, basePresetId: null, pendingDesignId: id, errors: [] };
+  applyAppearanceToMaterials(sw.draft);
+  armAppearance = sw.draft;
+  renderAppearance();
+}
+
+// 腕用マテリアルだけを更新する（猫耳のマテリアルには触れない。materialは作り直さず既存instanceを更新）
+function applyAppearanceToMaterials(a) {
+  armShellMat.color.set(a.shellColor);
+  armShellMat.metalness = a.metalness;
+  armShellMat.roughness = a.roughness;
+  armJointMat.color.set(a.jointColor);
+  armEmissionMat.color.set(a.emissionColor);
+  armEmissionMat.emissive.set(a.emissionColor);
+  armEmissionMat.emissiveIntensity = a.glow;
+}
+applyAppearanceToMaterials(appState.applied);
+
 function renderCards() {
   renderArmCards(selected);
 }
 function say(t) { info.textContent = t; setTimeout(() => { if (info.textContent === t) info.textContent = ""; }, 3000); }
+
+// プリセット・素材ボタンは最初に1回だけ作る（選択表示の切替は renderAppearance が行う）
+$("presets").innerHTML = DEMO_PRESETS.map(p => `<button data-p="${p.id}">${p.label}</button>`).join("");
+$("materials").innerHTML = Object.entries(MATERIAL_PRESETS).map(([k, m]) => `<button data-mat="${k}">${m.label}</button>`).join("");
+
+// appState から、画面（カード・プリセット・素材・色・スライダー・状態表示）をまとめて更新する
+function renderAppearance() {
+  const next = appState.pendingDesignId ?? appState.designId;
+  if (next !== selected) { selected = next; renderCards(); }
+  const d = appState.draft;
+  $("armShell").value = d.shellColor;
+  $("armJoint").value = d.jointColor;
+  $("armEmission").value = d.emissionColor;
+  $("armMetal").value = d.metalness; $("armMetalV").textContent = d.metalness.toFixed(2);
+  $("armRough").value = d.roughness; $("armRoughV").textContent = d.roughness.toFixed(2);
+  $("armGlow").value = d.glow;       $("armGlowV").textContent = d.glow.toFixed(1);
+  document.querySelectorAll("#presets button").forEach(b => b.classList.toggle("sel", b.dataset.p === appState.presetId));
+  document.querySelectorAll("#materials button").forEach(b => {
+    const m = MATERIAL_PRESETS[b.dataset.mat];
+    b.classList.toggle("sel", d.metalness === m.metalness && d.roughness === m.roughness);
+  });
+  const preset = DEMO_PRESETS.find(p => p.id === appState.presetId);
+  $("presetState").textContent = "プリセット：" + (appState.presetId === "custom" ? "カスタム" : preset ? preset.label : "未選択");
+  const dirty = (appState.pendingDesignId !== undefined && appState.pendingDesignId !== appState.designId)
+    || APPEARANCE_KEYS.some(k => appState.draft[k] !== appState.applied[k]);
+  const worn = exp.phase === PHASES.ACTION || exp.phase === PHASES.EQUIPPING;
+  $("applyState").textContent = dirty ? "編集中：APPLYで腕に反映されます"
+        : worn ? "装着中の外観と一致しています" : "外観は設定済み：APPLYで装着します";
+}
+
+function edit(patch) { appState = editDraft(appState, patch); renderAppearance(); }
+
+// デザインカードを選ぶ：試着表示にする（外観の処理は applyDesign の中）
 $("cards").onclick = e => {
   const card = e.target.closest('.card');
   if (!card || card.disabled || exp.phase !== PHASES.SELECT) return;
@@ -1028,6 +1113,24 @@ $("cards").onclick = e => {
   else clearArmModel();
   renderCards();
 };
+$("presets").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  appState = selectPreset(appState, b.dataset.p);
+  if (appState.errors.length) say("プリセットを適用できませんでした。");
+  renderAppearance();
+};
+$("materials").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const m = MATERIAL_PRESETS[b.dataset.mat];
+  edit({ metalness: m.metalness, roughness: m.roughness });
+};
+$("armShell").oninput = e => edit({ shellColor: e.target.value });
+$("armJoint").oninput = e => edit({ jointColor: e.target.value });
+$("armEmission").oninput = e => edit({ emissionColor: e.target.value });
+$("armMetal").oninput = e => edit({ metalness: +e.target.value });
+$("armRough").oninput = e => edit({ roughness: +e.target.value });
+$("armGlow").oninput = e => edit({ glow: +e.target.value });
+
 document.querySelectorAll(".tab.locked").forEach(t => t.onclick = () => say(t.dataset.n + " モジュールは次のステップで追加予定です。"));
 const EQUIP_MS = 1000;
 let equipTimer = null;
@@ -1043,6 +1146,7 @@ function syncPhaseUI() {
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
+  renderAppearance(); // 装着状態の表示も appState と exp から描き直す
   if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
   $("buy").hidden = !action || !!purchase?.active;
 }
@@ -1050,12 +1154,17 @@ $("apply").onclick = () => {
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
   purchase?.cancel();                         // 購入の途中なら取り消す（#22）
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
-  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: selected });
+  // 編集値(draft)を装備へ反映する（腕のマテリアルは作り直さず更新）
+  appState = applyDraft(appState);
+  applyAppearanceToMaterials(appState.applied);
+  armAppearance = appState.applied;
+  selected = appState.designId;
+  design = DESIGNS[appState.designId];
+  exp = reduceExperience(exp, { type: EVENTS.SELECT, id: appState.designId });
   exp = reduceExperience(exp, { type: EVENTS.APPLY, now: performance.now() });
   unlockEquipSound();
   playEquip();
-  applyDesign(DESIGNS[selected]);
-  gadget.views?.forEach(v => v.applyAppearance(design));
+  gadget.views?.forEach(v => v.applyAppearance(armLook()));
   if (design.model) useArmModel(design.model);                // GLBモデルがある装備（ACTION になると装着演出が始まる）
   else clearArmModel();
   const id = exp.requestId;
@@ -1120,6 +1229,11 @@ function doReset() {
   purchase?.reset(); // 購入の途中なら取り消し、写真も捨てる（#22）
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
+  appState = resetAppearance(appState);              // 外観の状態をmk1の既定へ
+  applyAppearanceToMaterials(appState.applied);      // 腕のマテリアルも既定へ（古い色を残さない）
+  armAppearance = appState.applied;
+  design = DESIGNS[appState.designId];
+  gadget.views?.forEach(v => v.applyAppearance(armLook()));   // ギミックの色もmk1の既定へ（RESETで残さない）
   selected = "mk1"; renderCards(); resetJoints();
   ARMS.forEach(a => { a.fit.upper.reset(); a.fit.fore.reset(); a.hand.lastSeen = -Infinity; });
   // 顔・目・耳の設定を初期値へ戻す（画面の入力欄も合わせる）
@@ -1138,7 +1252,6 @@ function doReset() {
   $('maskDepth').value = maskSettings.depth; $('maskCol').value = maskSettings.color; syncMask();
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
-  applyDesign(DESIGNS.mk1);
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
   clearArmModel();
   resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
