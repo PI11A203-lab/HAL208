@@ -1,18 +1,31 @@
 // 仮想購入（#22）の画面。状態は purchase-session.js が決め、ここでは表示とボタンをつなぐ。
-// 撮影（requestShot）・登録（register）・QR 描画（drawQr）は外から受け取る（main.js とテストページで差し替えられるように）。
+// 撮影（requestShot）・登録（register）・登録の取り消し（unregister）・QR 描画（drawQr）は外から受け取る
+// （main.js とテストで差し替えられるように）。
 // 写真はこのブラウザーのメモリーにだけ置き、待機に戻ると捨てる。
+// レシートの準備中に取り消した時は、登録を途中で止め、サーバーに届いたレシートも消す（#27 のレビュー）。
+// QR を表示した後の「終了」では消さない（来場者がスマホで保存できるよう、サーバーの有効期限まで残す）。
 import {
   PURCHASE, PURCHASE_EVENTS as E, PURCHASE_TIMING, createPurchase, reducePurchase, purchaseActive,
   countdownLeft, shouldShoot, timedOut,
 } from './purchase-session.js';
 
 export function createPurchaseFlow({
-  $, requestShot, register, drawQr,
+  $, requestShot, register, drawQr, unregister = async () => {}, makeRequestId = () => null,
   clock = () => performance.now() / 1000, urlApi = URL, timing = PURCHASE_TIMING, onChange = () => {},
 }) {
   let state = createPurchase();
   let photo = null, photoUrl = null;
   let shownPhase = null;
+  let pending = null;   // 準備中の登録 { request, controller, requestId }
+
+  // 準備中の登録を止め、サーバーに届いていれば消す
+  function abortPending() {
+    if (!pending) return;
+    const { controller, requestId } = pending;
+    pending = null;
+    controller.abort();
+    Promise.resolve().then(() => unregister(requestId)).catch(() => {});
+  }
 
   const sections = {
     [PURCHASE.NOTICE]: 'pNotice', [PURCHASE.COUNTDOWN]: 'pCount', [PURCHASE.PREVIEW]: 'pPreview',
@@ -49,6 +62,8 @@ export function createPurchaseFlow({
     const now = clock();
     const before = state;
     state = reducePurchase(state, { now, ...event });
+    // 準備中から QR 以外へ移った（取り消し・リセット・失敗）時は、登録を止めてレシートを消す
+    if (before.phase === PURCHASE.CONFIRMING && state.phase !== PURCHASE.CONFIRMING && state.phase !== PURCHASE.QR) abortPending();
     if (before.phase !== PURCHASE.IDLE && state.phase === PURCHASE.IDLE) dropPhoto();
     render(now);
     return state !== before;
@@ -73,12 +88,20 @@ export function createPurchaseFlow({
   async function confirm() {
     if (!dispatch({ type: E.CONFIRM })) return;
     const request = state.request;
+    const controller = new AbortController();
+    const requestId = makeRequestId();
+    pending = { request, controller, requestId };
+    const stillWaiting = () => state.request === request && state.phase === PURCHASE.CONFIRMING;
     try {
-      const { url } = await register(photo);
-      if (state.request !== request || state.phase !== PURCHASE.CONFIRMING) return;
+      const { url } = await register(photo, { signal: controller.signal, requestId });
+      // 取り消された後に登録が終わった場合も、レシートを残さない
+      if (!stillWaiting()) { Promise.resolve().then(() => unregister(requestId)).catch(() => {}); return; }
       await drawQr($('pQrCanvas'), url, { size: 280 });
+      if (!stillWaiting()) { Promise.resolve().then(() => unregister(requestId)).catch(() => {}); return; }
+      if (pending?.request === request) pending = null;
       dispatch({ type: E.READY, request, url });
     } catch (e) {
+      if (controller.signal.aborted) return;   // 取り消しで止めた
       dispatch({ type: E.FAILED, request, message: e?.message });
     }
   }
