@@ -11,3 +11,5 @@ Thumbs.db
 *.blend1
 *.blend2
 __pycache__/
+# 展示用起動ツールの実行記録・ログ（#21）
+.exhibition/

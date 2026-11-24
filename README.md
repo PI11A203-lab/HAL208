@@ -15,6 +15,9 @@ python -m http.server 8000 --bind 127.0.0.1
 http://localhost:8000 を開き、カメラを許可します。停止はターミナルでCtrl+C。
 環境に応じてpythonをpython3またはpyに変更します。ES ModulesとカメラAPIを使うためfile://で開かないでください。
 
+展示PC（Windows）では、repoルートの `start-exhibition.cmd` で起動（`npm run serve` と同じ展示用サーバー。QR受取も使えます）、`stop-exhibition.cmd` で終了できます。
+スタッフ向けの操作・復旧手順は [展示PC 運用ガイド](docs/exhibition-operations.md) を参照してください。
+
 ## 検証
 Node.js 22推奨（最低20.19）。repoルートで実行します。
 ```bash
@@ -33,7 +36,8 @@ CIはWindows・Linuxでlintと自動テスト、PR方向を確認します。
 
 ## 構成と文書
 - `project-chrome/`：作品のHTML・CSS・JavaScript。
-- `tests/`・`scripts/`：自動テストとPR検査。
+- `tests/`・`scripts/`：自動テスト、PR検査、展示用サーバーと起動・終了スクリプト。
+- [展示PC 運用ガイド](docs/exhibition-operations.md)：スタッフ向けの起動・終了・操作・QR受取・復旧手順。
 - `.github/`：CI、PR・IssueのTemplate。
 - [AGENTS.md](AGENTS.md)：AIが最初に読む規則。
 - [CONTRIBUTING.md](CONTRIBUTING.md)：メンバー用作業手順。
