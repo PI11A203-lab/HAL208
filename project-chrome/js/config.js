@@ -1,6 +1,42 @@
 // デザイン一覧と初期設定（日本語コメント）
 // 新しいアームのデザインは DESIGNS に追加します。
 export const DEFAULTS = { smooth: 0.5, depth: 0.5, thick: 1, showArm: true, showSkel: false };
+export const MASK_MODEL = { id: 'mask-prototype-04', name: 'PROTOTYPE 04', url: './assets/models/mask-prototype-04.glb' };
+export const MASK_MODELS = {
+  prototype: MASK_MODEL,
+  oni: { id: 'mask-oni-04', name: 'ONI 04', url: './assets/models/mask-oni-04-fit.glb',
+    heightSpan: 2.22, widthScale: 1.02, color: '#24272b' },
+  rabbit: { id: 'mask-rabbit-04', name: 'RABBIT 04', url: './assets/models/mask-rabbit-04.glb',
+    heightSpan: 2.15, widthScale: 1.02, liftOffset: 0.10, color: '#ffffff', fixedColor: true },
+};
+// 顎基準から少し下げた試着位置。起動時とRESETで共通にする。
+export const MASK_DEFAULTS = { model: 'prototype', enabled: false, size: 1, lift: -0.05, depth: 0, color: '#35383b' };
+
+// 腕の配置・投影に関する補正係数の一元管理。
+// 個人ごとの固定pxを埋めず、肩幅・区間長の比率で調整する（arm-tracking契約5）。
+export const ARM_TUNING = {
+  // カメラ方式：true=透視投影（遠近が効く・①）、false=正射影（従来挙動）。
+  // 切り分け用に残す。既定は透視投影だが、問題切り分け時は false にして従来挙動へ戻せる。
+  usePerspective: true,
+  // 透視投影カメラ。被写体から camDist(px) だけ引き、z=0平面が正射影と同じ見え方になるFOVを使う。
+  // これにより x=q.x*W / y=q.y*H のピクセル座標はそのまま画面位置に一致し、z≠0の点だけ遠近が効く。
+  camDist: 1800,     // カメラ距離(px相当)。大きいほど遠近が弱い（正射影に近い）。
+  near: 1,
+  far: 6000,
+  // シーンZのスケール。MediaPipeの相対zを過剰に増幅するとnearクリップで消えるため控えめに。
+  // 従来の settings.depth(0..1) と掛け合わせて最終的なZスケールにする。
+  zDepthScale: 0.6,
+  thickBase: 0.14,   // 腕の太さ基準（肩幅に対する比率）
+  foreThickRatio: 0.85,
+  // Z（奥行き）の荒ぶり対策。単眼のZは腕が重なると急に跳ねるため、専用に強めに抑える。
+  zSmoothFactor: 0.1,   // Zのカットオフ倍率（<1で x/y より強く平滑化）。小さいほど滑らか・追従遅い。
+  zMaxStepRatio: 0.1,  // 1フレームのZ変化上限（肩幅に対する比率）。跳ねをこの範囲にクランプ。
+  // visibility ゲート：点が隠れてvisが落ちるとzが大きく誤推定して飛ぶ
+  // （実測：クロス時に手首が vis51〜65% で Δz 0.4〜1.5の飛び。肩はvis100%で安定）。
+  // vis がこの値未満の点は z を更新せず直前値を凍結する（x/y は追従させる）。
+  // 点が描画される下限は VIS_MIN=0.5。それより高く、飛びの帯(〜0.65)の上に置く。
+  zVisFreeze: 0.7,
+};
 
 export const EAR_MODEL = {
   id: 'cyber-ears', name: 'PROTOTYPE 04',
@@ -16,13 +52,13 @@ export const EAR_MODELS = {
 export const DESIGNS = {
   mk1:   { name: "MK-I", desc: "ミニマルな産業用義手。", long: "強度と耐久性を高めた基本的な機械式アーム。信頼性が高く汎用的な標準モデル。",
            model: "arm-mk1",
-           metal: 0xaab2ba, rough: 0.28, joint: 0x1a1e24, neon: 0x00e5ff, glow: 1.2, thick: 1.0, stats: [50, 45, 60], css: ["#aab2ba", "#1a1e24", "#00e5ff"] },
-  neon:  { name: "NEON EDGE", desc: "発光するシアンのラインを備えたスリムな設計。", long: "漆黒のクロームフレームに発光ラインと高度なセンサーを統合したスリムモデル。",
+           metal: 0xaab2ba, rough: 0.38, joint: 0x1a1e24, neon: 0x00e5ff, glow: 1.2, thick: 1.0, stats: [50, 45, 60], css: ["#aab2ba", "#1a1e24", "#00e5ff"] },
+  neon:  { name: "NEON EDGE", desc: "赤いLEDと重ね装甲を備えたスリムな設計。", long: "黒いサテン装甲に赤い発光ラインと円形センサーを統合。反射と明暗で機械の輪郭を見せるスリムモデル。",
            model: "arm-neon",
-           metal: 0x0b0f13, rough: 0.12, joint: 0x05080a, neon: 0x00e5ff, glow: 3.2, thick: 0.85, stats: [35, 85, 45], css: ["#0b0f13", "#05080a", "#00e5ff"] },
+           metal: 0x0b0f13, rough: 0.32, joint: 0x05080a, neon: 0xc40307, ledLinear: [0.55, 0.001, 0.002], glow: 1.4, envIntensity: 1.8, thick: 0.85, stats: [35, 85, 45], css: ["#0b0f13", "#05080a", "#c40307"] },
   titan: { name: "TITAN FRAME", desc: "重作業向けの産業用エグゾスケルトン。", long: "最大出力と積載能力を重視した重作業向けの産業用アーム。",
            model: "arm-titan",
-           metal: 0x8c9097, rough: 0.42, joint: 0x18191c, neon: 0xffb300, glow: 1.6, thick: 1.3, stats: [90, 30, 85], css: ["#4a4e55", "#18191c", "#ffb300"] },
+           metal: 0x8c9097, rough: 0.44, joint: 0x18191c, neon: 0xffb300, glow: 1.6, thick: 1.3, stats: [90, 30, 85], css: ["#4a4e55", "#18191c", "#ffb300"] },
 };
 
 // 展示用のGLB腕モデル（Issue #7）。DESIGNS の model から id で参照します。

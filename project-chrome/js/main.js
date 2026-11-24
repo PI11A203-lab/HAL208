@@ -14,8 +14,13 @@ import { playSfx, setLoop, setSfxMuted, setSfxVolume, sfxMuted, stopAllLoops, un
 import { createChargeController, createGestureTrigger, createPunchDetector, shotPhase, shotDuration, isAimPose, elbowAngle,
          classifyHand, createStableLabel, isFist, isOpenHand, GESTURE_TO_GADGET } from "./gadget-logic.js";
 import { earShape } from "./face.js";
+import { trackState, armAge, shoulderWidth, isFinitePoint, clampZStep, gateZByVis, reprojectXY, handOrientation, HOLD_SEC } from "./arm-tracking.js";
 import { createEarController } from './ear-state.js';
 import { loadEarAsset } from './ear-model.js';
+import { loadMaskAsset } from './mask-model.js';
+import { fitMask } from './mask-fit.js';
+import { createLoadoutMenu } from './loadout-menu.js';
+import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=33-develop-merge';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
@@ -26,12 +31,13 @@ const glCanvas = document.getElementById("gl");
 const skelCanvas = document.getElementById("skel");
 const skelCtx = skelCanvas.getContext("2d");
 const info = document.getElementById("info");
+const loadoutMenu = createLoadoutMenu(document);
 
 /* ---------------- 設定 ---------------- */
 // 初期設定は config.js から読み込みます。
 const settings = { ...DEFAULTS };
 const VIS_MIN = 0.5;      // この信頼度未満の点は更新しない
-const HOLD_SEC = 0.6;     // 検出が途切れた点の最終位置を保持する時間（秒）
+// HOLD_SEC（保持時間）と tracking/holding/lost の境界は arm-tracking.js で一元管理する。
 const BETA = 0.02;        // One Euro：速度への感度（ピクセル単位）
 
 /* ---------------- One Euro フィルター ---------------- */
@@ -50,7 +56,7 @@ try {
   visionFiles = vision;
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
       delegate: "GPU",
     },
     runningMode: "VIDEO",
@@ -106,15 +112,32 @@ scene.add(key);
 // クロームに実際の部屋を映し、部屋の明るさに照明を合わせる（TRACKING SETTINGS の Room reflections）
 const roomEnv = createVideoEnvironment(renderer, scene, video);
 
-const camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
-camera.position.z = 2000;
+// カメラ：ARM_TUNING.usePerspective で透視/正射影を切替。
+// 透視投影：被写体から camDist だけ引き、z=0平面上では正射影と同じ画面位置になるFOVを使う。
+//   x=q.x*W / y=q.y*H のピクセル座標はそのまま画面に一致し、z≠0 の点にだけ遠近（奥は小さく）が効く。
+//   腕の前後関係が「重なり順」だけでなく「大きさ」でも表現され、交差時の破綻が減る。
+// 正射影：従来挙動（遠近なし）。切り分け・フォールバック用。
+let camera;
+if (ARM_TUNING.usePerspective) {
+  const camDist = ARM_TUNING.camDist;
+  const fovRad = 2 * Math.atan((H / 2) / camDist);
+  camera = new THREE.PerspectiveCamera(
+    THREE.MathUtils.radToDeg(fovRad), W / H, ARM_TUNING.near, ARM_TUNING.far);
+  camera.position.set(W / 2, H / 2, camDist);
+  camera.lookAt(W / 2, H / 2, 0);
+} else {
+  camera = new THREE.OrthographicCamera(0, W, H, 0, 0.1, 5000);
+  camera.position.z = 2000;
+}
+// 揺れ演出の基準位置。正射影は(0,0)、透視投影は(W/2,H/2)。揺れはこの位置を中心に加える。
+const camBaseX = camera.position.x, camBaseY = camera.position.y;
 const bloom = createBloom(renderer, W, H);              // 炎・弾のにじみ（Effects quality が HIGH の時）
 
 /* ---------------- ロボットアームモデル ---------------- */
 // 腕専用マテリアル（shell / joint / emission の3スロット）。猫耳とは共有しない。
 // 左右の腕は同じ3つのmaterialを共有する（色変更が左右に同時に反映される）。
 // 色・質感は applyAppearanceToMaterials() が appState.applied から更新する（materialは作り直さない）。
-const armShellMat    = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.9, roughness: 0.32 });
+const armShellMat    = new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.4, roughness: 0.38 });
 const armJointMat    = new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 1.0, roughness: 0.2 });
 const armEmissionMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 1.6 });
 
@@ -124,7 +147,7 @@ const sphereGeo = new THREE.SphereGeometry(1, 32, 24);
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 const torusGeo = new THREE.TorusGeometry(1, 0.08, 12, 48);
 
-function makeArm(name, ids) {
+function makeArm(name, ids, handIds) {
   const g = new THREE.Group();
   const m = {
     shoulder: new THREE.Mesh(sphereGeo, armJointMat),
@@ -138,10 +161,11 @@ function makeArm(name, ids) {
   Object.values(m).forEach(mesh => g.add(mesh));
   g.visible = false;
   scene.add(g);
-  return { name, ids, g, m, state: "lost" };
+  // ids=[肩,肘,手首]（状態判定・腕本体用）、handIds=[人差し指付け根,小指付け根]（手の向き用）。
+  return { name, ids, handIds, g, m, state: "lost" };
 }
-// MediaPipe：本人の左腕は 11-13-15、右腕は 12-14-16
-const ARMS = [makeArm("Left arm", [11, 13, 15]), makeArm("Right arm", [12, 14, 16])];
+// MediaPipe Pose：左腕 11-13-15（手首）＋ 19/17（人差し指/小指付け根）、右腕 12-14-16 ＋ 20/18。
+const ARMS = [makeArm("Left arm", [11, 13, 15], [19, 17]), makeArm("Right arm", [12, 14, 16], [20, 18])];
 // カスタムGLBモデルの読み込みには arms.js の loadGLB() を使用できます。
 
 /* ---------------- GLB腕モデル（Issue #7） ---------------- */
@@ -265,8 +289,9 @@ async function useArmModel(id, { animate = true } = {}) {
   }
 }
 
-/* ---------------- 関節疾患 ---------------- */
-const JOINTS = [11, 12, 13, 14, 15, 16];
+/* ---------------- 関節の追跡点 ---------------- */
+// 11-16=肩/肘/手首。17-20=手の向き用（小指/人差し指付け根の左右、handOrientation で使用）。
+const JOINTS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 const joints = {};
 function resetJoints() {
   for (const id of JOINTS) {
@@ -369,24 +394,50 @@ function processFrame(result, now) {
   if (!lm) return;
   const minCutoff = 3.0 * Math.pow(0.1, settings.smooth); // 0 → 3Hz（平滑化が弱い）、1 → 0.3Hz（平滑化が強い）
   for (const id of JOINTS) {
-    const q = lm[id], j = joints[id]; j.vis = q.visibility ?? 0;
-    if ((q.visibility ?? 0) < VIS_MIN) continue;        // 信頼度の低い点：最後の位置を保持
+    const q = lm[id], j = joints[id];
+    // 欠落点は visibility を参照する前に弾く（q が無いと q.visibility で TypeError になるため）。
+    // lastSeen を更新せず最後の位置を保持する（契約：異常点で跳ばさない）。
+    if (!q) continue;
+    j.vis = q.visibility ?? 0;
+    if (j.vis < VIS_MIN) continue;                      // 信頼度の低い点：最後の位置を保持
+    // 非有限値（NaN/Infinity）の点も同様に保持。
+    if (!isFinitePoint({ x: q.x, y: q.y, z: q.z ?? 0 })) continue;
     if (now - j.lastSeen > 0.3) { j.fx.reset(); j.fy.reset(); j.fz.reset(); } // 長く途切れた後に滑って戻らないようリセット
-    j.p.set(j.fx.filter(q.x * W, now, minCutoff, BETA),
-            j.fy.filter(q.y * H, now, minCutoff, BETA),
-            j.fz.filter(q.z * W, now, minCutoff, BETA));  // z：相対的な「推定」奥行き（実測ではない）
+    const x = j.fx.filter(q.x * W, now, minCutoff, BETA);
+    const y = j.fy.filter(q.y * H, now, minCutoff, BETA);
+    // z（奥行き）は単眼で最も不安定。x/yより弱いカットオフで強めに平滑化し、
+    // さらにフレーム間の跳ねを肩幅基準でクランプして「荒ぶり」を抑える（実測ではない推定値）。
+    const zFiltered = j.fz.filter((q.z ?? 0) * W, now, minCutoff * ARM_TUNING.zSmoothFactor, BETA);
+    // ① visゲート：隠れてvisが落ちた点のzは信用せず直前値を凍結（荒ぶりの根元を断つ）。
+    // ② ステップクランプ：凍結を通った更新でも、残る跳ねを肩幅基準で抑える。
+    const zGated = gateZByVis(j.p.z, zFiltered, j.vis, ARM_TUNING.zVisFreeze);
+    const z = clampZStep(j.p.z, zGated, bodyScale * ARM_TUNING.zMaxStepRatio);
+    j.p.set(x, y, z);
     j.raw.set(q.x * W, q.y * H);
     j.lastSeen = now;
   }
   const a = joints[11], b = joints[12];
   if (now - a.lastSeen < 0.3 && now - b.lastSeen < 0.3) {
-    bodyScale = Math.max(Math.hypot(a.p.x - b.p.x, a.p.y - b.p.y), 0.1 * W);
+    // 有効な両肩から肩幅を更新。異常値（0・非有限・画面幅超）は前回値を保持。
+    bodyScale = shoulderWidth(a.p, b.p, W, bodyScale);
   }
 }
 
 /* ---------------- 腕の配置 ---------------- */
 const Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
-const conv = p => new THREE.Vector3(p.x, H - p.y, -p.z * settings.depth);
+// ピクセル空間→シーン座標。y軸は上向き（H-y）。
+// zは settings.depth（UI 0..1）× ARM_TUNING.zDepthScale（config）で最終スケール。
+// 透視投影のnearクリップで腕が消えないよう、増幅は控えめにする。
+// 透視投影時は、zが付くと投影で画面中心基準に再拡大され追跡点からずれるため、
+// reprojectXY で中心オフセットを逆数倍に縮め、投影後に映像ピクセルへ戻す（実腕と一致）。
+// 正射影時は再拡大が起きないので補正しない（そのまま渡す）。
+const conv = p => {
+  const zScene = -p.z * settings.depth * ARM_TUNING.zDepthScale;
+  const yFlip = H - p.y;
+  if (!ARM_TUNING.usePerspective) return new THREE.Vector3(p.x, yFlip, zScene);
+  const r = reprojectXY(p.x, yFlip, zScene, W / 2, H / 2, ARM_TUNING.camDist);
+  return new THREE.Vector3(r.x, r.y, zScene);
+};
 
 function setCyl(mesh, a, b, r) {
   const d = new THREE.Vector3().subVectors(b, a);
@@ -554,8 +605,8 @@ function updateGadget(arm, s, now) {
 let shakeAmp = 0;
 function applyShake(dt) {
   const k = shakeAmp * bodyScale * 0.025;
-  camera.position.x = (Math.random() - 0.5) * k;
-  camera.position.y = (Math.random() - 0.5) * k;
+  camera.position.x = camBaseX + (Math.random() - 0.5) * k;
+  camera.position.y = camBaseY + (Math.random() - 0.5) * k;
   shakeAmp *= Math.exp(-dt * 9);
   if (shakeAmp < 0.01) shakeAmp = 0;
 }
@@ -608,8 +659,10 @@ function updateChargeHud() {
 
 function updateArm(arm, now) {
   const js = arm.ids.map(i => joints[i]);
-  const age = Math.max(...js.map(j => now - j.lastSeen));
-  arm.state = age < 0.1 ? "tracking" : age < HOLD_SEC ? "holding" : "lost";
+  // 追跡状態の境界は arm-tracking.js で一元管理（tracking<0.1秒, holding<0.6秒, lost）。
+  const lastSeen = {}; for (const id of arm.ids) lastSeen[id] = joints[id].lastSeen;
+  const age = armAge(arm.ids, lastSeen, now);
+  arm.state = trackState(age);
   const show = armsShown() && age < HOLD_SEC;
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
@@ -617,6 +670,8 @@ function updateArm(arm, now) {
   if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
+  // 非有限座標なら描画をスキップ（契約：異常点でモデルを跳ばさない）。
+  if (!isFinitePoint(sh) || !isFinitePoint(el) || !isFinitePoint(wr)) return;
   const m = arm.m;
   // 腕の太さ：測れていれば実際の幅（少し大きめ）、測れていなければ肩幅から推定
   const k = settings.thick * design.thick;
@@ -647,10 +702,28 @@ function updateArm(arm, now) {
   const fl = Math.max(fd.length(), 1e-3);
   fd.divideScalar(fl);
 
-  // 手（簡易ボックス）：手首から先へ配置。手首のひねり（ロール）は分からないため単純な形にしている
+  // 手（簡易ボックス）：手首から先へ配置。
+  // 手ランドマーク（人差し指/小指付け根）が十分見えていれば、手の向き・ひねりに追従させる。
+  // 見えない場合は前腕方向へ伸ばす従来挙動にフォールバック（契約：見えない点で無理に向けない）。
   const handLen = fl * 0.45;
-  m.hand.position.copy(wr).addScaledVector(fd, handLen / 2);
-  m.hand.quaternion.setFromUnitVectors(Y, fd);
+  const [idxJ, pinJ] = arm.handIds.map(i => joints[i]);
+  const handVisOk = (now - idxJ.lastSeen < HOLD_SEC) && (now - pinJ.lastSeen < HOLD_SEC) &&
+                    idxJ.vis >= VIS_MIN && pinJ.vis >= VIS_MIN;
+  const ho = handVisOk ? handOrientation(wr, conv(idxJ.p), conv(pinJ.p)) : null; // 手首・指はシーン座標へ
+  if (ho) {
+    // forward=手の指す向き、normal=手の甲の法線（ロール）。両者から正規直交基底を作り、手をひねりまで追従させる。
+    const fwd = new THREE.Vector3(ho.forward.x, ho.forward.y, ho.forward.z);
+    const nrm = new THREE.Vector3(ho.normal.x, ho.normal.y, ho.normal.z);
+    const side = new THREE.Vector3().crossVectors(nrm, fwd).normalize();
+    const up2 = new THREE.Vector3().crossVectors(fwd, side).normalize(); // 直交化
+    // ボックスのローカルY(長軸)を手の向きfwd、Z(厚み方向)を法線に合わせる。
+    m.hand.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, fwd, up2));
+    m.hand.position.copy(wr).addScaledVector(fwd, handLen / 2);
+  } else {
+    // フォールバック：手ランドマークが見えないときは前腕方向へ伸ばす（従来挙動）。
+    m.hand.position.copy(wr).addScaledVector(fd, handLen / 2);
+    m.hand.quaternion.setFromUnitVectors(Y, fd);
+  }
   m.hand.scale.set(base * 1.5, handLen, base * 0.7);
   if (handOffset) m.hand.position.add(new THREE.Vector3().fromArray(handOffset));   // ロケットフィスト
 
@@ -686,7 +759,7 @@ const EYE_POLY = [ // 目の開口部の輪郭（まぶたで虹彩を隠すた�
   [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7],
   [362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382],
 ];
-const FIDS = [...new Set([10, 152, 234, 454, 103, 332, 468, 469, 471, 473, 474, 476, ...EYE_POLY.flat()])];
+const FIDS = [...new Set([6, 10, 152, 234, 454, 103, 332, 468, 469, 471, 473, 474, 476, ...EYE_POLY.flat()])];
 const fp = {}; // 平滑化した顔の点（ピクセル空間）
 for (const id of FIDS) fp[id] = { f: [new OneEuro(), new OneEuro(), new OneEuro()], p: new THREE.Vector3() };
 
@@ -741,6 +814,36 @@ function syncEarModel() {
     : '装着位置：耳をONにすると髪の輪郭へ配置します。';
   document.getElementById('earLEDControls').hidden = !EAR_MODELS[face.earModel]?.led;
   earController.setEnabled(face.ears && Boolean(EAR_MODELS[face.earModel]), face.earModel);
+}
+
+// 耳と同じ非同期ライフサイクルを再利用（RESET/OFF中に完了した旧読込は破棄）。
+const maskSettings = { ...MASK_DEFAULTS };
+let maskError = '';
+const maskController = createEarController({
+  load: id => loadMaskAsset(MASK_MODELS[id].url),
+  onError: () => { maskError = '読込に失敗しました。OFF→ONで再試行できます。'; },
+  onChange: () => {
+    const asset = maskController.asset;
+    if (asset) {
+      if (!asset.root.parent) scene.add(asset.root);
+      asset.root.visible = false;
+      asset.applyColor(maskSettings.color);
+    }
+    document.getElementById('maskStatus').textContent = !maskSettings.enabled
+      ? 'OFF：マスクは外れています。' : maskController.loading ? 'マスクを読込中…'
+      : maskError || (asset ? '装着準備完了：顔をカメラへ向けてください。' : '準備中…');
+  },
+});
+function syncMask() {
+  maskError = '';
+  document.querySelectorAll('#maskCards button').forEach(button => {
+    const active = maskSettings.enabled && button.dataset.mask === maskSettings.model;
+    button.classList.toggle('sel', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  document.getElementById('maskCol').disabled = Boolean(MASK_MODELS[maskSettings.model].fixedColor);
+  if (maskController.asset) maskController.asset.root.visible = false;
+  maskController.setEnabled(maskSettings.enabled, maskSettings.model);
 }
 
 /* --- 目：2Dキャンバスに描画（映像と同じ座標系。CSSで一緒に左右反転される） --- */
@@ -816,6 +919,22 @@ function processFace(res, now) {
 function updateFace(now) {
   const ok = now - face.lastSeen < HOLD_SEC;
   const P = id => fp[id].p;
+  const maskAsset = maskController.asset;
+  if (maskAsset) {
+    const fit = maskSettings.enabled && ok ? fitMask({
+      left: P(234).toArray(), right: P(454).toArray(), forehead: P(10).toArray(),
+      chin: P(152).toArray(), nose: P(6).toArray(),
+    }, maskSettings, MASK_MODELS[maskSettings.model]) : null;
+    maskAsset.root.visible = Boolean(fit);
+    if (fit) {
+      maskAsset.root.position.fromArray(fit.origin);
+      maskAsset.root.scale.fromArray(fit.scale);
+      maskAsset.root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(...fit.right), new THREE.Vector3(...fit.up), new THREE.Vector3(...fit.forward)));
+    }
+    if (maskSettings.enabled) document.getElementById('maskStatus').textContent = fit
+      ? '装着中：顔に追従しています。' : '顔を探しています。カメラへ顔を向けてください。';
+  }
   const earOn = face.ears && ok;
   const glbEars = EAR_MODELS[face.earModel] && earController.enabled ? earController.asset : null;
   ears.forEach(e => e.g.visible = earOn && !glbEars);
@@ -884,7 +1003,7 @@ function updateFace(now) {
 
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
-import { DESIGNS, DEFAULTS, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js';
+import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js?v=33-develop-merge';
 import {
   APPEARANCE_KEYS, createAppearanceState, selectPreset, editDraft,
   applyDraft, switchDesign, resetAppearance,
@@ -896,6 +1015,7 @@ import {
 let appState = createAppearanceState(DESIGNS, DEMO_PRESETS, "mk1");
 let selected = "mk1", design = DESIGNS.mk1;
 let exp = createExperience(); // カード選択で試着、APPLYで装着演出とアクションを開始
+let purchase = null;          // 仮想購入の画面（#22）。下の「仮想購入」で作る
 function armsShown() { return armDisplayMode(exp) !== 'none'; }
 
 // GLBの腕・ギミックに渡す外観。デザインの値に、いま腕に見せている外観を重ねて返す。
@@ -905,8 +1025,18 @@ let armAppearance = appState.applied;
 const hexNum = s => parseInt(s.slice(1), 16);
 function armLook() {
   const a = armAppearance;
-  return { ...design, metal: hexNum(a.shellColor), joint: hexNum(a.jointColor), neon: hexNum(a.emissionColor),
-           rough: a.roughness, metalness: a.metalness, glow: a.glow };
+  // その装備の既定の外観と比べ、画面で「変えた項目」だけを上書きする。
+  // 変えていない項目は、デザイン（サテン仕上げ・NEONの赤色LEDなど）の見た目のままにする。
+  const id = Object.keys(DESIGNS).find(k => DESIGNS[k] === design);
+  const base = switchDesign(appState, id).draft;
+  const look = { ...design };
+  if (a.shellColor !== base.shellColor) look.metal = hexNum(a.shellColor);
+  if (a.jointColor !== base.jointColor) look.joint = hexNum(a.jointColor);
+  if (a.emissionColor !== base.emissionColor) { look.neon = hexNum(a.emissionColor); look.ledLinear = null; }   // 赤色LED指定より画面の色を優先
+  if (a.roughness !== base.roughness) look.rough = a.roughness;
+  if (a.metalness !== base.metalness) look.metalness = a.metalness;
+  if (a.glow !== base.glow) look.glow = a.glow;
+  return look;
 }
 
 // カードで試着する時に呼ぶ。デザインを切り替え、編集値(draft)をそのデザインの既定値にし、
@@ -1017,9 +1147,12 @@ function syncPhaseUI() {
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING;
   renderAppearance(); // 装着状態の表示も appState と exp から描き直す
+  if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
+  $("buy").hidden = !action || !!purchase?.active;
 }
 $("apply").onclick = () => {
   if (exp.phase === PHASES.EQUIPPING) return; // 装着中の連打は無視
+  purchase?.cancel();                         // 購入の途中なら取り消す（#22）
   if (exp.phase === PHASES.ACTION) exp = reduceExperience(exp, { type: EVENTS.BACK }); // 体験中の再装着は一度選択へ戻す
   // 編集値(draft)を装備へ反映する（腕のマテリアルは作り直さず更新）
   appState = applyDraft(appState);
@@ -1047,6 +1180,7 @@ $("apply").onclick = () => {
 $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  purchase?.cancel(); // 購入の途中なら取り消す（#22）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   armModel.assembly = null;
   armModel.views?.forEach(view => view.setAssembly(null));
@@ -1092,6 +1226,7 @@ function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  purchase?.reset(); // 購入の途中なら取り消し、写真も捨てる（#22）
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
   appState = resetAppearance(appState);              // 外観の状態をmk1の既定へ
@@ -1111,6 +1246,10 @@ function doReset() {
   $("earFitStatus").textContent = '装着位置：髪の輪郭を基準に配置します。';
   $("ears").checked = false; $("earSize").value = 1; $("earCol").value = "#1b1f25"; earMat.color.set("#1b1f25");
   $("eyeCol").value = "#00e5ff"; $("eyeOp").value = 0.85;
+  Object.assign(maskSettings, MASK_DEFAULTS);
+  $('maskOn').checked = maskSettings.enabled; $('maskSize').value = maskSettings.size;
+  $('maskLift').value = maskSettings.lift;
+  $('maskDepth').value = maskSettings.depth; $('maskCol').value = maskSettings.color; syncMask();
   document.querySelectorAll("#eyeMode button").forEach(b => b.classList.toggle("sel", b.dataset.m === "off"));
   document.querySelectorAll("#eyeSw i").forEach(i => i.classList.remove("sel"));
   ARMS.forEach(a => { a.g.visible = false; a.state = "lost"; });
@@ -1118,8 +1257,7 @@ function doReset() {
   resetGadgetState();                                          // 溜め・弾・ジェスチャー判定・音を持ち越さない
   setGadgetKind("auto");
   // タブを初期表示（ARMS）へ戻す
-  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x.dataset.t === "arms"); x.setAttribute("aria-pressed", String(x.dataset.t === "arms")); });
-  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== "arms";
+  loadoutMenu.select('arms');
   $("apply").style.display = "";
   syncPhaseUI();
 }
@@ -1130,14 +1268,28 @@ document.addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "g" && !(e.target instanceof HTMLInputElement)) fireGadget(performance.now() / 1000);
 });
 document.querySelectorAll('#panel button, #stage button').forEach(button => { button.disabled = false; });
+loadoutMenu.refresh();
 renderCards();
 syncPhaseUI();
 setGadgetKind("auto");                                         // 初期状態はジェスチャーで選ぶ AUTO
-document.querySelectorAll(".tab[data-t]").forEach(t => t.onclick = () => {   // タブ切替
-  document.querySelectorAll(".tab[data-t]").forEach(x => { x.classList.toggle("sel", x === t); x.setAttribute("aria-pressed", String(x === t)); });
-  for (const n of ["arms", "eyes", "head"]) $("sec-" + n).hidden = n !== t.dataset.t;
-  $("apply").style.display = "";
-});
+$('maskOn').onchange = event => { maskSettings.enabled = event.target.checked; syncMask(); };
+$('maskCards').onclick = event => {
+  const button = event.target.closest('button[data-mask]');
+  if (!button || button.disabled || !MASK_MODELS[button.dataset.mask]) return;
+  maskSettings.model = button.dataset.mask;
+  maskSettings.enabled = true;
+  $('maskOn').checked = true;
+  maskSettings.color = MASK_MODELS[maskSettings.model].color ?? MASK_DEFAULTS.color;
+  $('maskCol').value = maskSettings.color;
+  syncMask();
+};
+for (const [id, key] of [['maskSize', 'size'], ['maskLift', 'lift'], ['maskDepth', 'depth']]) {
+  $(id).oninput = event => { maskSettings[key] = +event.target.value; };
+}
+$('maskCol').oninput = event => {
+  if (MASK_MODELS[maskSettings.model].fixedColor) return;
+  maskSettings.color = event.target.value; maskController.asset?.applyColor(maskSettings.color);
+};
 $("eyeSw").innerHTML = ["#00e5ff", "#ffb300", "#ff1744", "#00e676", "#b388ff", "#ffffff"].map(c => `<i data-c="${c}" style="background:${c}"></i>`).join("");
 $("eyeSw").onclick = e => { const c = e.target.dataset.c; if (c) { face.eyeCol = c; $("eyeCol").value = c; } };
 $("eyeCol").oninput = e => face.eyeCol = e.target.value;
@@ -1185,16 +1337,37 @@ $("capture").onclick = () => {
   captureMsg("撮影中...");
 };
 function endCapture() { capture.finish(); $("capture").disabled = false; }
-function cancelCapture() { capture.cancel(); if (!capture.busy) $("capture").disabled = false; }
+function cancelCapture() {
+  capture.cancel();
+  if (!capture.busy) {
+    $("capture").disabled = false;
+    if (purchaseShot) { purchaseShot.reject(new Error("撮影を取り消しました")); purchaseShot = null; }
+  }
+}
+// 購入用の撮影（#22）：PNG をダウンロードせずに返す。保存の撮影と同じ合成（video→eyec→gl）を使う
+let purchaseShot = null;
+function requestPurchaseShot() {
+  return new Promise((resolve, reject) => {
+    if (!capture.request()) { reject(new Error(capture.busy ? "前の撮影を処理しています。もう一度お試しください。" : "カメラの準備ができていません。")); return; }
+    purchaseShot = { resolve, reject };
+  });
+}
 // renderer.render の直後に呼ぶ（WebGLの描画内容が消える前に読むため）
 function runCapture() {
   if (!capture.take()) return;
+  const forPurchase = purchaseShot;
+  purchaseShot = null;
   try {
     composeFrame(shotCtx, [video, eyec, glCanvas], W, H);
   } catch (e) {
     console.warn("撮影の合成に失敗:", e.message);
-    captureMsg("撮影に失敗しました");
+    if (forPurchase) forPurchase.reject(new Error("撮影に失敗しました。"));
+    else captureMsg("撮影に失敗しました");
     endCapture();
+    return;
+  }
+  if (forPurchase) {
+    canvasToPngBlob(shotCanvas).then(forPurchase.resolve, forPurchase.reject).finally(endCapture);
     return;
   }
   canvasToPngBlob(shotCanvas)
@@ -1202,6 +1375,33 @@ function runCapture() {
     .catch(e => { console.warn("PNG保存に失敗:", e.message); captureMsg("保存に失敗しました"); })
     .finally(endCapture);
 }
+
+/* ---------------- 仮想購入（撮影 → QR 受取） #22 ---------------- */
+import { createPurchaseFlow } from './purchase-ui.js';
+import { registerReceipt, drawQr } from './receipt-client.js';
+import { composeReceipt } from './receipt.js';
+// レシートに載せる、その時の装備（名前などの個人情報は入れない）
+function loadoutSnapshot() {
+  return {
+    arm: DESIGNS[exp.appliedId]?.name ?? null,
+    eyes: face.eyeMode,
+    eyeColor: face.eyeCol,
+    ears: face.ears ? $("earModel").selectedOptions[0]?.textContent.replace(/\s*\(.*\)$/, "") ?? null : null,
+  };
+}
+purchase = createPurchaseFlow({
+  $,
+  requestShot: requestPurchaseShot,
+  register: async (photo) => registerReceipt(await composeReceipt({ photo, loadout: loadoutSnapshot() })),   // 写真入りレシートを作って登録
+  drawQr,
+  onChange: () => {
+    document.body.classList.toggle("purchasing", purchase?.active ?? false);
+    syncPhaseUI();
+  },
+});
+$("buy").onclick = () => { if (exp.phase === PHASES.ACTION) purchase.buy(); };
+setInterval(() => purchase.tick(), 100);
+syncPhaseUI();
 
 function updateHud(now) {
   const conf = JOINTS.reduce((s, id) => { const j = joints[id]; return s + (now - j.lastSeen < 0.3 ? j.vis : 0); }, 0) / JOINTS.length;
@@ -1234,7 +1434,7 @@ function loop() {
     processFrame(result, now);
     processBodyFit(result);
     processHands(t0, now);
-    if (face.ears || face.eyeMode !== "off") processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
+    if (face.ears || face.eyeMode !== "off" || maskSettings.enabled) processFace(faceLm.detectForVideo(video, t0), now); // 顔検出は必要な時のみ実行
     frameDt = lastFrame === null ? 1 / 30 : Math.min(0.1, Math.max(0.001, now - lastFrame));
     lastFrame = now;
     ARMS.forEach(a => updateArm(a, now));

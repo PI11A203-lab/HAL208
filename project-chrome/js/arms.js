@@ -171,6 +171,7 @@ export function createArmView(template, model, { mirror = false } = {}) {
     },
     // design：config.js の DESIGNS の1件（色・粗さ・発光）。
     // metalness（任意）：画面で選んだ金属感。省略した時はモデルの値のまま。
+    // envIntensity（任意）：環境の映り込みの強さ。ledLinear（任意）：発光色をリニア色で直接指定する。
     // 既存のマテリアルの値を書き換えるだけで、新しいマテリアルは作らない。
     applyAppearance(design) {
       const shell = materials.get('shell'), joint = materials.get('joint'), emission = materials.get('emission');
@@ -178,11 +179,16 @@ export function createArmView(template, model, { mirror = false } = {}) {
         shell.color.setHex(design.metal);
         shell.roughness = design.rough;
         if (design.metalness !== undefined) shell.metalness = design.metalness;   // 画面で選んだ金属感
+        shell.envMapIntensity = design.envIntensity ?? 1;
       }
       if (joint) joint.color.setHex(design.joint);
       if (emission) {
         emission.color.setHex(design.neon);
         emission.emissive.setHex(design.neon);
+        if (design.ledLinear) {
+          emission.color.setRGB(...design.ledLinear, THREE.LinearSRGBColorSpace);
+          emission.emissive.setRGB(...design.ledLinear, THREE.LinearSRGBColorSpace);
+        }
         emission.emissiveIntensity = design.glow;
       }
     },
