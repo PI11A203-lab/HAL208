@@ -225,3 +225,37 @@ export function createChargeController({ minHold = 0.15, fullCharge = 1.0, autoF
   };
   return self;
 }
+
+// シールド（#9）：開いた手を hold 秒保持するか、ボタン（force）で発動する。
+// ・発動は保持の1回だけ（fired）。maxActive 秒で止まり、手を解くまで再発動しない
+// ・解除後は cooldown 秒待つ。手の喪失（want=false）は即解除。ボタン由来は手が見えなくても期限まで続く
+export function createShieldController({ hold = 0.25, maxActive = 3, cooldown = 0.6, ramp = 0.3 } = {}) {
+  let active = false, source = null, since = 0, candidate = null, coolUntil = -Infinity, spent = false;
+  const release = (now) => { active = false; source = null; candidate = null; coolUntil = now + cooldown; };
+  const out = (now, fired = false) => ({ on: active, fired, source, strength: active ? clamp01((now - since) / ramp) : 0 });
+  return {
+    update(now, want) {
+      if (active && source === 'button') {
+        if (now - since >= maxActive) release(now);
+        return out(now);
+      }
+      if (active) {
+        if (!want) release(now);
+        else if (now - since >= maxActive) { release(now); spent = true; }
+        return out(now);
+      }
+      if (spent) { if (!want) spent = false; return out(now); }
+      if (!want || now < coolUntil) { candidate = null; return out(now); }
+      candidate ??= now;
+      if (now - candidate >= hold) { active = true; source = 'hand'; since = now; return out(now, true); }
+      return out(now);
+    },
+    // ボタン：同じ制御（クールダウン・最長時間）を通す。発動できなければ false
+    force(now) {
+      if (active || now < coolUntil) return false;
+      active = true; source = 'button'; since = now; candidate = null; spent = false;
+      return true;
+    },
+    reset() { active = false; source = null; candidate = null; coolUntil = -Infinity; spent = false; },
+  };
+}

@@ -23,6 +23,8 @@ import { createLoadoutMenu } from './loadout-menu.js';
 import { MASK_MODELS, MASK_DEFAULTS } from './config.js?v=33-develop-merge';
 import { createHairTracker } from './hair-tracking.js';
 import { fitEarAnchor } from './hair-fit.js';
+import { createArmGlow, createShield } from './effects.js';
+import { createShieldController } from './gadget-logic.js';
 import { PoseLandmarker, FaceLandmarker, HandLandmarker, FilesetResolver }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -446,7 +448,7 @@ const gadget = { kind: "off", views: null, requests: createRequestTracker(),
                  shots: ARMS.map(() => null), aimDir: ARMS.map(() => [0, 1, 0]), curDir: ARMS.map(() => [0, 1, 0]),
                  foreLen: ARMS.map(() => 100),
                  triggers: ARMS.map(() => createGestureTrigger({ hold: 0.2 })), punches: ARMS.map(() => createPunchDetector()),
-                 labels: ARMS.map(() => null) };
+                 labels: ARMS.map(() => null), forceUntil: 0 };
 // 待機中に表示する装置の形（AUTO の時は射出装置）
 const idleKind = () => (gadget.kind === "auto" ? "plasma" : gadget.kind);
 const flames = ARMS.map(() => { const f = createFlame(); scene.add(f.object); return f; });
@@ -568,12 +570,12 @@ function updateGadget(arm, s, now) {
   gadget.foreLen[i] = Math.max(d.length(), 1);
   gadget.curDir[i] = d.normalize().toArray();
   const [ps, pe, pw] = arm.ids.map(id => joints[id].p);
-  const aiming = isAimPose(ps, pe, pw);
+  const aiming = isAimPose(ps, pe, pw) || now < gadget.forceUntil;   // forceUntil：CHARGEボタン
   if (aiming) gadget.aimDir[i] = gadget.curDir[i];
   const pts = s.hand?.points;
   let ev;
   if (gadget.kind === "auto") {
-    const charging = autoGestures(i, pts, elbowAngle(ps, pe, pw), aiming, now);
+    const charging = autoGestures(i, pts, elbowAngle(ps, pe, pw), aiming, now) || now < gadget.forceUntil;
     ev = ctrl.update(now, { aiming: charging });
   } else {
     ev = ctrl.update(now, { aiming, fist: pts ? isFist(pts) : false, open: pts ? isOpenHand(pts) : false, tracked: Boolean(pts) });
@@ -657,7 +659,7 @@ function updateArm(arm, now) {
   const view = armModel.views?.[ARMS.indexOf(arm)];      // GLBが使える時はGLB、それ以外は簡易形状
   arm.g.visible = show && !view;
   view?.setVisible(show);
-  if (!show) { updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
+  if (!show) { dropShield(ARMS.indexOf(arm)); updateHandLabel(ARMS.indexOf(arm), null); updateGadget(arm, null, now); updateFlame(arm, null, now); return; }
 
   const [sh, el, wr] = js.map(j => conv(j.p));
   // 非有限座標なら描画をスキップ（契約：異常点でモデルを跳ばさない）。
@@ -674,6 +676,7 @@ function updateArm(arm, now) {
   updateHandLabel(ARMS.indexOf(arm), hand?.points ?? null);
   const handOffset = updateGadget(arm, { el, wr, thickness: foreR, hand }, now);
   updateFlame(arm, hand, now);
+  updateShield(arm, el, wr, Boolean(hand), now);
 
   if (view) {
     const [a, b, c] = [sh, el, wr].map(v => v.toArray());
@@ -991,6 +994,70 @@ function updateFace(now) {
   });
 }
 
+/* ---------------- シールドと充電の発光（#9） ---------------- */
+// 手の認識・充電（PLASMAの溜め）は上の腕のギミックの仕組みを使う。
+// ・シールド：腕を構えていない状態で開いた手を保持、またはSHIELDボタン（createShieldController）
+// ・充電の発光：PLASMAの溜め（charge）に連動して腕の発光を強め、解除で基準の外観へ戻す
+const armGlow = createArmGlow({ emissionMat: armEmissionMat });
+const shields = ARMS.map(() => createShieldController());
+const shieldViews = ARMS.map(() => createShield(scene));
+let boostOn = false;
+// 腕が映っていない時のSHIELDボタン用（画面中央に出す。腕が映っていれば使わない）
+const screenShield = createShieldController(), screenShieldView = createShield(scene);
+
+function updateShield(arm, el, wr, hasHand, now) {
+  const i = ARMS.indexOf(arm);
+  const [ps, pe, pw] = arm.ids.map(id => joints[id].p);
+  const want = armDisplayMode(exp) === 'action' && hasHand && currentLabel[i] === "open" && !isAimPose(ps, pe, pw);
+  const r = shields[i].update(now, want);
+  if (!r.on) { shieldViews[i].hide(); return; }
+  const fd = new THREE.Vector3().subVectors(wr, el).normalize();
+  shieldViews[i].update(wr.clone().addScaledVector(fd, bodyScale * 0.35), bodyScale * 0.5, r.strength, armLook().neon, now);
+}
+function dropShield(i) { shields[i].reset(); shieldViews[i].hide(); }
+function updateScreenShield(now) {
+  const r = armDisplayMode(exp) === 'action' ? screenShield.update(now, false) : { on: false };
+  if (!r.on) { screenShieldView.hide(); if (armDisplayMode(exp) !== 'action') screenShield.reset(); return; }
+  screenShieldView.update(new THREE.Vector3(W / 2, H / 2, 0), bodyScale * 0.7, r.strength, armLook().neon, now);
+}
+
+function restoreArmGlow() {
+  boostOn = false;
+  armGlow.restore(armLook()); armModel.views?.forEach(v => v.applyAppearance(armLook()));
+}
+function updateArmGlow() {
+  const c = Math.max(0, ...gadget.ctrls.filter(x => x.mode === "charging").map(x => x.charge));
+  if (c > 0) {
+    boostOn = true;
+    const look = armLook();
+    armGlow.set(c, look); armModel.views?.forEach(v => v.setBoost(c, look));
+  } else if (boostOn) restoreArmGlow();
+}
+
+// 効果を止めて基準外観へ戻す（phase変更・BACK・RESETで共通）
+function stopGesture() {
+  ARMS.forEach((_, i) => dropShield(i));
+  screenShield.reset(); screenShieldView.hide();
+  gadget.forceUntil = 0;
+  if (boostOn) restoreArmGlow();
+}
+
+// ボタン：手の判定と同じ制御を通す
+function triggerCharge() {
+  const now = performance.now() / 1000;
+  if (armDisplayMode(exp) !== 'action') return;
+  if (gadget.kind === "off") { say("GADGET で種類を選んでください。"); return; }
+  if (!ARMS.some(a => a.state !== "lost")) { say("腕が映ると使えます。"); return; }
+  gadget.forceUntil = now + 1.2;   // 構えたものとして溜め、満タンか期限で発射する
+}
+function triggerShield() {
+  const now = performance.now() / 1000;
+  if (armDisplayMode(exp) !== 'action') return;
+  const live = ARMS.filter(a => a.state !== "lost");
+  if (!live.length) { if (!screenShield.force(now)) say("少し待ってからもう一度押してください。"); return; }
+  if (!live.map(a => shields[ARMS.indexOf(a)].force(now)).some(Boolean)) say("少し待ってからもう一度押してください。");
+}
+
 /* ---------------- デザインとUI ---------------- */
 const $ = id => document.getElementById(id);
 import { DESIGNS, DEFAULTS, ARM_TUNING, ARM_MODELS, BODY_FIT, GADGET, FLAME, EAR_MODELS, MATERIAL_PRESETS, DEMO_PRESETS } from './config.js?v=33-develop-merge';
@@ -1136,6 +1203,8 @@ function syncPhaseUI() {
   if (!action) $("guide").hidden = true;
   $("reset").hidden = action;
   $("apply").disabled = exp.phase === PHASES.EQUIPPING || camState !== "ready";
+  $("gCharge").hidden = !action; $("gShield").hidden = !action;
+  if (!action) stopGesture();
   renderAppearance(); // 装着状態の表示も appState と exp から描き直す
   if (!action && purchase?.active) purchase.cancel();        // 体験中以外では購入を続けない（#22）
   $("buy").hidden = !action || !!purchase?.active;
@@ -1171,6 +1240,7 @@ $("apply").onclick = () => {
 $("back").onclick = () => {
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  stopGesture();
   purchase?.cancel(); // 購入の途中なら取り消す（#22）
   exp = reduceExperience(exp, { type: EVENTS.BACK });
   armModel.assembly = null;
@@ -1180,6 +1250,8 @@ $("back").onclick = () => {
   syncPhaseUI();
   say("装備選択に戻りました。");
 };
+$("gCharge").onclick = triggerCharge;
+$("gShield").onclick = triggerShield;
 $("help").onclick = () => { $("guide").hidden = !$("guide").hidden; };
 let staffOpen = false;
 function setStaffConfirm(open) { staffOpen = open; $("staffConfirm").hidden = !open; }
@@ -1217,6 +1289,7 @@ function doReset() {
   Object.assign(settings, { smooth: 0.5, depth: 0.5, thick: 1, showSkel: false });
   cancelEquip();
   cancelCapture(); // 未実行の撮影要求を取り消す（#11）
+  stopGesture();
   purchase?.reset(); // 購入の途中なら取り消し、写真も捨てる（#22）
   exp = reduceExperience(exp, { type: EVENTS.RESET }); // 体験状態の初期化（experience.js）
   $("showSkel").checked = false; $("smooth").value = 0.5; $("depth").value = 0.5; $("thick").value = 1;
@@ -1529,6 +1602,8 @@ function loop() {
     ARMS.forEach(a => updateArm(a, now));
     updateAssembly(now);
     updateChargeHud();
+    updateArmGlow();
+    updateScreenShield(now);
     updateLoops(now);
     updateFace(now);
     drawSkel();

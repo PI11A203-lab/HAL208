@@ -92,7 +92,8 @@
 .actionBtns button { padding: 12px 18px; border-radius: 6px; font-size: 12px; letter-spacing: 2px; cursor: pointer; font-weight: 600; }
 #back { background: linear-gradient(90deg, #00b8d4, #18ffff); color: #04222a; border: 0; }
 #help { background: transparent; color: #cfe8ee; border: 1px solid #2a4a54; }
-#back[hidden], #help[hidden], #guide[hidden], #staffConfirm[hidden] { display: none; }
+#gCharge, #gShield { background: rgba(8,20,28,.85); color: #18ffff; border: 1px solid #0e4a58; }
+#back[hidden], #help[hidden], #guide[hidden], #staffConfirm[hidden], #gCharge[hidden], #gShield[hidden] { display: none; }
 
 #guide { position: absolute; right: 0; bottom: calc(100% + 10px); width: 300px; padding: 12px 14px; background: rgba(8,20,28,.92); border: 1px solid #0e4a58; border-radius: 6px; font-size: 11px; line-height: 1.6; color: #9bb8c0; }
 #guide b { color: #4dd0e1; letter-spacing: 1px; }

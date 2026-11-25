@@ -192,6 +192,11 @@ export function createArmView(template, model, { mirror = false } = {}) {
         emission.emissiveIntensity = design.glow;
       }
     },
+    // 充電中の発光を一時的に強める（strength 0〜1）。基準の外観へ戻すには applyAppearance を呼ぶ
+    setBoost(strength, design) {
+      const emission = materials.get('emission');
+      if (emission) emission.emissiveIntensity = design.glow * (1 + 2.5 * Math.min(1, Math.max(0, strength)));
+    },
     setVisible(visible) { root.visible = visible; },
     // このinstanceのマテリアルだけを解放する（共有geometryはテンプレートが持つため解放しない）
     dispose() {
